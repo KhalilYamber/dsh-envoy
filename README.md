@@ -40,8 +40,8 @@ dsh-api.ps1            桥接脚本（唯一核心代码）
 config.example.json    配置模板（复制为 config.json 使用）
 COLLAB.md              双 agent 协作协议模板
 AGENT-SETUP.md         Agent 部署手册
-docs/DSH-API-Notes.md  DSH Web API 逆向笔记
-task-specs/            任务书留档（含示例性环境值，仅供参考格式）
+DSH-API-Notes.md       DSH Web API 逆向笔记
+task-spec-*.md         任务书留档（含示例性环境值，仅供参考格式）
 ```
 
 ## 安全说明
@@ -51,7 +51,7 @@ task-specs/            任务书留档（含示例性环境值，仅供参考格
 
 ## 适配与免责
 
-适配 DSH 0.1.0-rc.6。DSH 处于开发者预览期，API 可能有破坏性变更，升级后请对照 docs/DSH-API-Notes.md 验证。
+适配 DSH 0.1.0-rc.6。DSH 处于开发者预览期，API 可能有破坏性变更，升级后请对照 DSH-API-Notes.md 验证。
 
 ## License
 

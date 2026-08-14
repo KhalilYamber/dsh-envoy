@@ -2,6 +2,8 @@
 
 > 给 Hana 接一个「外包 coding 的开关」。说一句「派给 DSH」，任务就流向本机 DeepSeek Harness 执行：审批同步回 Hana 里决策，结果自动带回，全程不必切换界面。
 
+> 什么是 DSH？DSH（DeepSeek Harness）是 DeepSeek 官方的编码 Agent 框架（类似 Codex CLI），在本机沙箱里执行写代码、跑命令等长任务。本插件负责在 Hana 和 DSH 之间搭桥。
+
 ## 这是什么
 
 DSH Envoy 是一个 Hana 插件，桥接 Hana 与本机 DeepSeek Harness（DSH）。
@@ -36,7 +38,7 @@ Hana ：正在派单【0815-01】…（external 模式）
 
 ## 安装（手动解压，已验证）
 
-1. 下载 `dist/dsh-bridge-0.2.3.zip`
+1. 从 [Releases 页面](https://github.com/KhalilYamber/dsh-envoy/releases) 下载 `dsh-bridge-0.2.3.zip`（或直接用仓库 `dist/` 目录里的同名文件）
 2. 解压到 Hana 的插件目录，目录名必须是 `dsh-bridge`：
    - Windows：`C:\Users\<您的用户名>\.hanako\plugins\dsh-bridge`
    - macOS / Linux：`~/.hanako/plugins/dsh-bridge`

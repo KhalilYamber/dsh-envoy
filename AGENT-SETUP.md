@@ -114,13 +114,13 @@ git clone https://github.com/KhalilYamber/hana-dsh-bridge.git <目标目录>
 方式二：下载 zip
 浏览器打开 https://github.com/KhalilYamber/hana-dsh-bridge ，点 Code → Download ZIP，解压。
 
-目标目录建议放在 DSH 安装目录旁，例如 `<安装目录>\hana-dsh-bridge`。
+目标目录建议放在 DSH 安装目录旁，例如 `<安装目录>\hana-dsh-bridge`。若主人的 HanaAgent 有 skills 目录（如 `~/.hanako/skills`），可直接放进去当 Skill 安装，装上即生效。
 
 ### 第 2 步：首次运行（自动配置）
 
 ```
 cd /d <目标目录>
-powershell -NoProfile -File dsh-api.ps1 new
+powershell -NoProfile -File scripts\dsh-api.ps1 new
 ```
 
 预期行为（缺一即异常）：
@@ -134,15 +134,15 @@ powershell -NoProfile -File dsh-api.ps1 new
 
 ```
 第 1 步：创建会话并记录 id
-    powershell -NoProfile -File dsh-api.ps1 new
+    powershell -NoProfile -File scripts\dsh-api.ps1 new
     → 记下输出的 sessionId（记为 SID）
 
 第 2 步：向该会话发测试任务
-    powershell -NoProfile -File dsh-api.ps1 prompt SID "请只回复：桥接成功"
+    powershell -NoProfile -File scripts\dsh-api.ps1 prompt SID "请只回复：桥接成功"
     → 应输出 True
 
 第 3 步：轮询状态直到完成
-    powershell -NoProfile -File dsh-api.ps1 status SID
+    powershell -NoProfile -File scripts\dsh-api.ps1 status SID
     → 间隔 15 秒重复查询，直到「状态: 已完成」
     → 「最近助手」中应包含「桥接成功」
 ```
@@ -187,4 +187,4 @@ powershell -NoProfile -File dsh-api.ps1 new
 2. DSH 安装目录与桥目录
 3. 阶段 4 三项验收结果
 4. 主人日常使用的一句话命令：
-   `powershell -NoProfile -File <桥目录>\dsh-api.ps1 run "任务描述"`
+   `powershell -NoProfile -File <桥目录>\scripts\dsh-api.ps1 run "任务描述"`

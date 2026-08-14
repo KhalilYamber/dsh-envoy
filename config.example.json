@@ -1,0 +1,8 @@
+{
+  "BaseUrl": "http://127.0.0.1:3080",
+  "WorkspaceId": "",
+  "AssistWorkspaceTitle": "协助Hana",
+  "AssistWorkspacePath": "",
+  "PollIntervalSeconds": 6,
+  "TimeoutSeconds": 1800
+}

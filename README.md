@@ -34,19 +34,20 @@ Hana ：正在派单【0815-01】…（external 模式）
 
 不确定自己属于哪种？装完插件后对 Hana 说「派给 DSH：在工作区建个测试文件」，插件会自动探测并给出人话提示。
 
-## 安装
-
-### 方式一：Hana 插件界面（推荐）
-
-下载 `dist/dsh-bridge-0.2.3.zip`，在 Hana 的插件设置中导入安装（若您的 Hana 版本支持本地导入）。
-
-### 方式二：手动解压
+## 安装（手动解压，已验证）
 
 1. 下载 `dist/dsh-bridge-0.2.3.zip`
 2. 解压到 Hana 的插件目录，目录名必须是 `dsh-bridge`：
    - Windows：`C:\Users\<您的用户名>\.hanako\plugins\dsh-bridge`
    - macOS / Linux：`~/.hanako/plugins/dsh-bridge`
 3. 重启 Hana
+
+> 若您的 Hana 版本有插件管理界面，也可尝试从界面导入（各版本能力不同，以手动解压为准）。
+
+## 平台支持
+
+- **外接模式**：跨平台（Node.js 22+，需要全局 WebSocket）
+- **内置模式**：目前 Windows 实测（进程管理与依赖复用依赖 Windows 命令）；macOS / Linux 建议用外接模式
 
 ## 配置（插件设置界面）
 

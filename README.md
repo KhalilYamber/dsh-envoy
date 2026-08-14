@@ -109,6 +109,10 @@ LICENSE                  MIT
 - 本仓库不含任何 API Key 或凭据
 - 内置模式的 `danger-full-access` 会解除沙箱边界，仅在您明确授权后使用
 
+## 致谢
+
+本项目开发中借鉴了 [Nyasers/dsh-hanako](https://github.com/Nyasers/dsh-hanako)（DSHana，MIT License）的设计思路：宿主 deferred 通道的调用方式、审批应答的信封结构、任务台账与标签的组织模式。代码为独立重写并换芯（headless 取代 web host），谨此致谢原作者的优秀工作。
+
 ## License
 
 MIT

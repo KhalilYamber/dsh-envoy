@@ -227,6 +227,145 @@ function doneResult(opId, final, mode) {
 }
 
 async function run(ctx) {
+function singleton(ctx) {
+  const g = globalThis;
+  if (!g.__dshBridge || typeof g.__dshBridge !== 'object') g.__dshBridge = {};
+  const s = g.__dshBridge;
+  // 兜底：Hana 按需加载 tools，工具可能先于 onload 拿到 ctx 字段
+  if (ctx?.bus && !s.bus) s.bus = ctx.bus;
+  if (ctx?.dataDir && !s.dataDir) s.dataDir = ctx.dataDir;
+  if (ctx?.config && !s.cfgSnapshot) s.cfgSnapshot = ctx.config;
+  return s;
+}
+
+function liveConfig(s) {
+  const merged = { ...(s.cfgSnapshot ?? {}) };
+  try {
+    if (s.dataDir) {
+      const file = path.join(s.dataDir, 'config.json');
+      if (fs.existsSync(file)) {
+        const g = JSON.parse(fs.readFileSync(file, 'utf8'))?.global;
+        if (g && typeof g === 'object') {
+          for (const [k, v] of Object.entries(g)) {
+            if (v != null && v !== '') merged[k] = v;
+          }
+        }
+      }
+    }
+  } catch {
+    // config.json 损坏静默，用快照
+  }
+  return merged;
+}
+
+function nextOpId() {
+  return `op_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+}
+
+function ledger(s) {
+  if (!s.ops) s.ops = new Map();
+  return s.ops;
+}
+
+function doneResult(opId, final, mode) {
+  return {
+    kind: 'dsh-done',
+    opId,
+    tool: 'dsh_run',
+    tag: final?.tag ?? null,
+    sessionId: final?.sessionId ?? null,
+    mode,
+    status: final?.status ?? 'error',
+    stopReason: final?.stopReason ?? null,
+    conclusion: String(final?.conclusion ?? '').slice(0, 4000), // design.md：结论 ≤4000 字符
+    checkpoints: final?.checkpoints ?? [],
+    artifacts: final?.artifacts ?? [],
+    usage: final?.usage ?? null,
+    durationMs: final?.durationMs ?? null,
+    ...(final?.error ? { error: final.error } : {}),
+  };
+}
+
+async function registerDeferred({ bus, sessionPath, taskId, label }) {
+  if (!bus?.request || !sessionPath || !taskId) return false;
+  try {
+    await bus.request('deferred:register', {
+      taskId,
+      sessionPath,
+      meta: {
+        type: 'dsh-run',
+        label: String(label || ''),
+        deliveryIntent: 'trigger_parent_turn',
+        notifyAgentOnFailure: true,
+      },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveDeferred({ bus, taskId, result }) {
+  if (!bus?.request || !taskId) return false;
+  try {
+    await bus.request('deferred:resolve', { taskId, result });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function failDeferred({ bus, taskId, error }) {
+  if (!bus?.request || !taskId) return false;
+  try {
+    await bus.request('deferred:fail', { taskId, error });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function notifyApproval({ bus, sessionPath, opId, approval, task, log }) {
+  if (!bus?.request || !sessionPath || !opId) {
+    try {
+      log?.warn?.(
+        `[dsh-bridge] deferred 通道不可用，审批 ${approval?.approvalId ?? '?'} 无法通知宿主（仅记录日志）`
+      );
+    } catch {
+      // 日志失败静默
+    }
+    return;
+  }
+  const taskId = `${opId}::approval::${approval.approvalId}`;
+  try {
+    await bus.request('deferred:register', {
+      taskId,
+      sessionPath,
+      meta: { type: 'dsh-approval', label: `dsh 审批: ${approval.toolName || 'tool'}` },
+    });
+    await bus.request('deferred:resolve', {
+      taskId,
+      result: {
+        kind: 'dsh-approval',
+        opId,
+        sessionId: approval.sessionId ?? null,
+        approvalId: approval.approvalId,
+        toolName: approval.toolName ?? null,
+        callId: approval.callId ?? null,
+        reason: approval.reason ?? null,
+        args: approval.args ?? null,
+        taskPreview: String(task ?? '').slice(0, 120),
+      },
+    });
+  } catch (e) {
+    try {
+      log?.warn?.(`[dsh-bridge] 审批 deferred 通知失败：${e?.message || e}`);
+    } catch {
+      // 日志失败静默
+    }
+  }
+}
+
   const s = singleton(ctx);
   const cfg = liveConfig(s);
   const sessionPath = ctx?.sessionPath ?? null;

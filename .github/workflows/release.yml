@@ -1,0 +1,204 @@
+# =============================================================================
+# dsh-envoy 发版流水线：tag 即发版
+# -----------------------------------------------------------------------------
+# 触发方式：
+#   1. 推送 v* 标签（例如 git tag v0.2.6 && git push origin v0.2.6）
+#   2. 仓库 Actions 页 -> release -> Run workflow（workflow_dispatch），
+#      填 version 输入项（不带 v，如 0.2.6）
+#
+# 三个 job 串成一条链：create-release -> build -> verify
+#   create-release：版本一致性校验 + 创建 pre-release（已存在则跳过）
+#   build         ：跑 pack.ps1 打包，上传 zip + sha256（--clobber 幂等）
+#   verify        ：下载资产，校验齐全 + PK 魔数 + EOCD + sha256，失败删 release
+# =============================================================================
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（不带 v，如 0.2.6）。必须与 manifest.json 的 version 完全一致。'
+        required: true
+
+# gh 命令行需要 contents: write 来创建 / 上传 / 删除 release。
+# 若个别仓库对删除 release 有更严的策略（报 403），把 verify 的权限临时提到
+# administration: write 即可。
+permissions:
+  contents: write
+
+# 让每个 job 里的 gh 命令自动带上 GITHUB_TOKEN。
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  # ===========================================================================
+  # create-release —— 第一道闸：先拦版本不一致，再建 pre-release
+  # 干什么：
+  #   1) 计算版本号（tag 触发取 GITHUB_REF_NAME 去掉 v；手动触发取 inputs.version）
+  #      与 tag 名（v + 版本号）。
+  #   2) 比对 tag 版本与 manifest.json 的 version，不一致立即失败。
+  #   3) 建 pre-release（--generate-notes 自动生成发布说明；已存在则跳过）。
+  # 为什么：版本是唯一事实源。版本对不上，就根本不该产生 release，
+  #         否则会留下一个空壳 pre-release。这一步把「漏改版本」挡在门外。
+  # ===========================================================================
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 计算版本号与 tag 名
+        id: meta
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::版本号为空：workflow_dispatch 必须填写 version 输入项"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "版本号=${VERSION}，tag=v${VERSION}"
+
+      - name: 校验 tag 版本与 manifest.json 版本一致
+        run: |
+          TAG_VERSION="${{ steps.meta.outputs.version }}"
+          MANIFEST_VERSION="$(jq -r .version manifest.json)"
+          if [[ "$TAG_VERSION" != "$MANIFEST_VERSION" ]]; then
+            echo "::error::版本不一致：tag 是 ${TAG_VERSION}，manifest.json 是 ${MANIFEST_VERSION}。请先改 manifest.json 的 version 再发版。"
+            exit 1
+          fi
+          echo "版本一致：tag=${TAG_VERSION}，manifest=${MANIFEST_VERSION}"
+
+      - name: 创建 pre-release（已存在则跳过）
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release ${TAG} 已存在，跳过创建"
+          else
+            gh release create "$TAG" \
+              --prerelease \
+              --generate-notes \
+              --title "dsh-bridge ${{ steps.meta.outputs.version }}"
+          fi
+
+  # ===========================================================================
+  # build —— 产线：打包 + 上传 zip 与 sha256
+  # 干什么：
+  #   1) 在 Windows 上直接跑仓库自带的 pack.ps1，产出
+  #      dist/dsh-bridge-<version>.zip 与 dist/dsh-bridge-<version>.zip.sha256。
+  #   2) 校验产出的资产名与版本号一致（第二道闸）。
+  #   3) 用 --clobber 把 zip 和 sha256 一起上传到 release（幂等，可重复跑）。
+  # 为什么：pack.ps1 是打包逻辑的唯一事实源。直接跑，不重写、不移植，
+  #         避免两套打包脚本漂移出两种结果；zip 和 sha256 一起上传，
+  #         保证 verify 有据可查。
+  # ===========================================================================
+  build:
+    needs: create-release
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.create-release.outputs.version }}
+      TAG: ${{ needs.create-release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 打包（跑仓库自带的 pack.ps1）
+        shell: pwsh
+        run: |
+          & ./pack.ps1
+          Write-Output '--- dist 内容 ---'
+          Get-ChildItem dist | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: 校验资产名与版本一致
+        shell: pwsh
+        run: |
+          $Zip = "dist/dsh-bridge-$env:VERSION.zip"
+          $Sha = "dist/dsh-bridge-$env:VERSION.zip.sha256"
+          if (-not (Test-Path $Zip)) {
+            Write-Error "缺少 $Zip：pack.ps1 产出的资产名与版本不一致，请检查 manifest.json 的 version"
+            exit 1
+          }
+          if (-not (Test-Path $Sha)) {
+            Write-Error "缺少 $Sha"
+            exit 1
+          }
+          Write-Output "资产名与版本一致：$Zip"
+
+      - name: 上传 zip 与 sha256 到 release
+        shell: pwsh
+        run: |
+          gh release upload $env:TAG `
+            "dist/dsh-bridge-$env:VERSION.zip" `
+            "dist/dsh-bridge-$env:VERSION.zip.sha256" `
+            --clobber
+
+      - name: 打包失败时清理 release
+        if: failure()
+        shell: pwsh
+        run: |
+          Write-Output 'build 失败，删除 release 避免留下空壳'
+          gh release delete $env:TAG --yes 2>$null
+
+  # ===========================================================================
+  # verify —— 质检：下载资产，校验齐全 + zip 真实性 + sha256
+  # 干什么：
+  #   1) 用精确名字下载 zip 与 sha256（名字必须严格等于 dsh-bridge-<version>.zip，
+  #      顺带验证「资产名 = tag 版本」这第三重一致性）。
+  #   2) 检查两个文件都齐。
+  #   3) 校验 zip 真实性：魔数 PK + EOCD 结束标记 + sha256 对得上。
+  #   4) 任一不过 -> 删掉这个 release 并让流水线失败。
+  # 为什么：这是最后一道闸。缺资产、文件损坏、半成品都不能流出去。
+  #         删 release 是为了不留「看着有、其实坏」的入口误导用户。
+  # ===========================================================================
+  verify:
+    needs: [build, create-release]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.create-release.outputs.version }}
+      TAG: ${{ needs.create-release.outputs.tag }}
+    steps:
+      - name: 下载并校验资产（含失败清理）
+        run: |
+          ZIP="download/dsh-bridge-${VERSION}.zip"
+          SHA="${ZIP}.sha256"
+
+          # 任一校验失败：删 release，再让 job 失败
+          fail() {
+            echo "::error::$1"
+            echo "删除 release ${TAG}（资产缺失或校验失败）"
+            gh release delete "$TAG" --yes 2>/dev/null || true
+            exit 1
+          }
+
+          mkdir -p download
+          # 按精确名字下载；名字对不上（缺失）时 gh 会报错，这里容忍，
+          # 交给下面的 [[ -f ]] 统一判断并给出清晰报错
+          gh release download "$TAG" --dir download --pattern "dsh-bridge-${VERSION}.zip" 2>/dev/null || true
+          gh release download "$TAG" --dir download --pattern "dsh-bridge-${VERSION}.zip.sha256" 2>/dev/null || true
+
+          # 1) 资产齐全
+          [[ -f "$ZIP" ]] || fail "缺失资产 ${ZIP}"
+          [[ -f "$SHA" ]] || fail "缺失资产 ${SHA}"
+
+          # 2) 魔数 PK（zip 前 2 字节应为 50 4B）
+          magic="$(head -c 2 "$ZIP" | od -An -tx1 | tr -d ' \n')"
+          [[ "$magic" == "504b" ]] || fail "zip 魔数错误：期望 504b，实际 ${magic}"
+
+          # 3) EOCD 结束标记（最后 65557 字节内应含 50 4B 05 06）
+          tail -c 65557 "$ZIP" | grep -a -q -F $'\x50\x4b\x05\x06' \
+            || fail "zip 缺少 EOCD 结束标记（文件截断或非合法 zip）"
+
+          # 4) sha256 校验（.sha256 只含哈希；兼容 BOM、换行、大小写差异）
+          expected="$(sed $'1s/^\xef\xbb\xbf//' "$SHA" | tr -d '\r\n \t' | tr 'A-Z' 'a-z')"
+          actual="$(sha256sum "$ZIP" | awk '{print $1}')"
+          [[ "$actual" == "$expected" ]] || fail "sha256 不匹配：期望 ${expected}，实际 ${actual}"
+
+          echo "校验通过：${ZIP}（PK + EOCD + sha256 全部正确）"

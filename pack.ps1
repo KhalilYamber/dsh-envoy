@@ -1,6 +1,8 @@
 # pack.ps1 - package dsh-bridge into an installable plugin zip
 # usage: powershell -NoProfile -File pack.ps1 [outDir]
 # output: <outDir>/dsh-bridge-<version>.zip (+ .sha256)
+# NOTE: keep this file pure ASCII (PS 5.1 reads BOM-less files as ANSI/GBK;
+#       non-ASCII text would be garbled and can break execution).
 
 param(
     [string]$OutDir = ''
@@ -20,7 +22,7 @@ $Version = $Manifest.version
 $ZipName = "dsh-bridge-$Version.zip"
 $ZipPath = Join-Path $OutDir $ZipName
 
-$Include = @('index.js', 'manifest.json', 'README.md', 'lib', 'tools', 'skills')
+$Include = @('index.js', 'manifest.json', 'README.md', 'LICENSE', 'lib', 'tools', 'skills', 'scripts')
 
 if (Test-Path $OutDir) { Remove-Item $OutDir -Recurse -Force }
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
@@ -37,6 +39,13 @@ Compress-Archive -Path (Join-Path $Staging '*') -DestinationPath $ZipPath -Compr
 
 $Hash = (Get-FileHash $ZipPath -Algorithm SHA256).Hash
 Set-Content -Path "$ZipPath.sha256" -Value $Hash -Encoding UTF8
+
+# verify-zip: post-pack self check (PK magic + EOCD + sha256; shared with CI)
+& node (Join-Path $Root 'scripts/verify-zip.mjs') $ZipPath "$ZipPath.sha256"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "verify-zip check failed, packaging aborted: $ZipPath"
+    exit 1
+}
 
 Remove-Item $Staging -Recurse -Force
 

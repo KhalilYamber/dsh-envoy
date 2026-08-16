@@ -16,7 +16,8 @@
       "./tools/dsh-run.js",
       "./tools/dsh-status.js",
       "./tools/dsh-approve.js",
-      "./tools/dsh-cancel.js"
+      "./tools/dsh-cancel.js",
+      "./tools/dsh-diagnose.js"
     ],
     "configuration": {
       "title": "DSH Bridge 设置",

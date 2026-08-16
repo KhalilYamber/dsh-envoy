@@ -11,7 +11,8 @@ DSH Envoy 是一个 Hana 插件，桥接 Hana 与本机 DeepSeek Harness（DSH�
 - **派活**：Hana 把任务书写给 DSH，DSH 在沙箱里长时间干活
 - **审批**：DSH 请求越界权限时，审批同步到 Hana 对话里问您（允许一次 / 拒绝）；DSH 界面的原生审批弹窗保留作兜底
 - **结果卡片**：任务完成自动带回结构化结果，Hana 用原生卡片呈现（状态、耗时、token 用量、交付物、审批记录，明细折叠可展开）
-- **任务记录**：每次工作自动打日期标签（如 0815-01），可查进度、可止损、会话可续跑
+- **任务记录**：每次工作自动打日期标签（如 0815-01），可查进度、可止损、会话可续跑；终态元数据落盘 tasks.jsonl，重启后可查
+- **自愈诊断**：连不上 DSH 时调 `dsh_diagnose` 体检（Node / 依赖 / 连接 / 上次退出四项，全部运行级验证），每项带人话修复指引
 
 ## 效果示例
 
@@ -60,6 +61,8 @@ Hana ：正在派单【0815-01】…（external 模式）
 | `defaultCwd` | 可留空。留空时外接模式任务落进 DSH 的「协助Hana」工作区 |
 | `dshInstallDir` | 可留空。内置模式找不到 DSH 安装时，填它的安装根目录 |
 
+> 配置默认值以 `manifest.json` 的 `contributes.configuration.properties[].default` 为单一事实源：改默认值（超时、审批超时、端口、模式等）只改 manifest 一处，无需改代码。
+
 ## 使用
 
 对 Hana 说：
@@ -83,13 +86,15 @@ Hana 会：派单前对敏感操作向您预授权问询 → 派单后盯梢 →
 
 ```
 README.md                本文件
-manifest.json            插件清单（版本、配置项）
+manifest.json            插件清单（版本、配置项；配置默认值的单一事实源）
 index.js                 插件入口
-lib/                     连接抽象、DSH 客户端、headless 运行器、任务状态机、任务记录落盘、会话路由、标签
-tools/                   四个工具：dsh_run / dsh_status / dsh_approve / dsh_cancel
+lib/                     连接抽象、DSH 客户端、headless 运行器、任务状态机、任务记录落盘、会话路由、配置默认值、标签
+tools/                   五个工具：dsh_run / dsh_status / dsh_approve / dsh_cancel / dsh_diagnose
 skills/dsh-bridge/       配套技能（Hana 的操作手册，自动加载）
+scripts/verify-zip.mjs   zip 真实性校验（PK 魔数 + EOCD + sha256，pack 与 CI 共用）
+.github/workflows/       发版流水线（create-release → build → verify）
 dist/                    可安装的插件包
-pack.ps1                 开发者打包脚本（生成 dist）
+pack.ps1                 开发者打包脚本（生成 dist，打包后自动 verify-zip）
 LICENSE                  MIT
 ```
 

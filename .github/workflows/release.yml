@@ -8,8 +8,9 @@
 #
 # 三个 job 串成一条链：create-release -> build -> verify
 #   create-release：版本一致性校验 + 创建 pre-release（已存在则跳过）
-#   build         ：跑 pack.ps1 打包，上传 zip + sha256（--clobber 幂等）
-#   verify        ：下载资产，校验齐全 + PK 魔数 + EOCD + sha256，失败删 release
+#   build         ：跑 pack.ps1 打包（内含 verify-zip 自检），上传 zip + sha256（--clobber 幂等）
+#   verify        ：下载资产，校验齐全 + 跑 scripts/verify-zip.mjs（PK + EOCD + sha256），失败删 release
+# verify 与本地打包共用 scripts/verify-zip.mjs 单一实现（防两套校验漂移）。
 # =============================================================================
 name: release
 
@@ -36,13 +37,6 @@ env:
 jobs:
   # ===========================================================================
   # create-release —— 第一道闸：先拦版本不一致，再建 pre-release
-  # 干什么：
-  #   1) 计算版本号（tag 触发取 GITHUB_REF_NAME 去掉 v；手动触发取 inputs.version）
-  #      与 tag 名（v + 版本号）。
-  #   2) 比对 tag 版本与 manifest.json 的 version，不一致立即失败。
-  #   3) 建 pre-release（--generate-notes 自动生成发布说明；已存在则跳过）。
-  # 为什么：版本是唯一事实源。版本对不上，就根本不该产生 release，
-  #         否则会留下一个空壳 pre-release。这一步把「漏改版本」挡在门外。
   # ===========================================================================
   create-release:
     runs-on: ubuntu-latest
@@ -92,14 +86,8 @@ jobs:
 
   # ===========================================================================
   # build —— 产线：打包 + 上传 zip 与 sha256
-  # 干什么：
-  #   1) 在 Windows 上直接跑仓库自带的 pack.ps1，产出
-  #      dist/dsh-bridge-<version>.zip 与 dist/dsh-bridge-<version>.zip.sha256。
-  #   2) 校验产出的资产名与版本号一致（第二道闸）。
-  #   3) 用 --clobber 把 zip 和 sha256 一起上传到 release（幂等，可重复跑）。
-  # 为什么：pack.ps1 是打包逻辑的唯一事实源。直接跑，不重写、不移植，
-  #         避免两套打包脚本漂移出两种结果；zip 和 sha256 一起上传，
-  #         保证 verify 有据可查。
+  # pack.ps1 打包后自动跑 scripts/verify-zip.mjs 自检（PK + EOCD + sha256），
+  # 校验不过 pack.ps1 直接失败，坏包不会流到上传环节。
   # ===========================================================================
   build:
     needs: create-release
@@ -110,7 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 打包（跑仓库自带的 pack.ps1）
+      - name: 打包（跑仓库自带的 pack.ps1，内含 verify-zip 自检）
         shell: pwsh
         run: |
           & ./pack.ps1
@@ -148,15 +136,8 @@ jobs:
           gh release delete $env:TAG --yes 2>$null
 
   # ===========================================================================
-  # verify —— 质检：下载资产，校验齐全 + zip 真实性 + sha256
-  # 干什么：
-  #   1) 用精确名字下载 zip 与 sha256（名字必须严格等于 dsh-bridge-<version>.zip，
-  #      顺带验证「资产名 = tag 版本」这第三重一致性）。
-  #   2) 检查两个文件都齐。
-  #   3) 校验 zip 真实性：魔数 PK + EOCD 结束标记 + sha256 对得上。
-  #   4) 任一不过 -> 删掉这个 release 并让流水线失败。
-  # 为什么：这是最后一道闸。缺资产、文件损坏、半成品都不能流出去。
-  #         删 release 是为了不留「看着有、其实坏」的入口误导用户。
+  # verify —— 质检：下载资产，校验齐全 + 共用 verify-zip.mjs（PK + EOCD + sha256）
+  # 与本地打包共用 scripts/verify-zip.mjs 单一实现，防两套校验逻辑漂移。
   # ===========================================================================
   verify:
     needs: [build, create-release]
@@ -165,6 +146,8 @@ jobs:
       VERSION: ${{ needs.create-release.outputs.version }}
       TAG: ${{ needs.create-release.outputs.tag }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: 下载并校验资产（含失败清理）
         run: |
           ZIP="download/dsh-bridge-${VERSION}.zip"
@@ -188,17 +171,7 @@ jobs:
           [[ -f "$ZIP" ]] || fail "缺失资产 ${ZIP}"
           [[ -f "$SHA" ]] || fail "缺失资产 ${SHA}"
 
-          # 2) 魔数 PK（zip 前 2 字节应为 50 4B）
-          magic="$(head -c 2 "$ZIP" | od -An -tx1 | tr -d ' \n')"
-          [[ "$magic" == "504b" ]] || fail "zip 魔数错误：期望 504b，实际 ${magic}"
-
-          # 3) EOCD 结束标记（最后 65557 字节内应含 50 4B 05 06）
-          tail -c 65557 "$ZIP" | grep -a -q -F $'\x50\x4b\x05\x06' \
-            || fail "zip 缺少 EOCD 结束标记（文件截断或非合法 zip）"
-
-          # 4) sha256 校验（.sha256 只含哈希；兼容 BOM、换行、大小写差异）
-          expected="$(sed $'1s/^\xef\xbb\xbf//' "$SHA" | tr -d '\r\n \t' | tr 'A-Z' 'a-z')"
-          actual="$(sha256sum "$ZIP" | awk '{print $1}')"
-          [[ "$actual" == "$expected" ]] || fail "sha256 不匹配：期望 ${expected}，实际 ${actual}"
+          # 2) 共用 verify-zip.mjs：PK 魔数 + EOCD 结束标记 + sha256 比对
+          node scripts/verify-zip.mjs "$ZIP" "$SHA" || fail "zip 校验失败（PK/EOCD/sha256）"
 
           echo "校验通过：${ZIP}（PK + EOCD + sha256 全部正确）"

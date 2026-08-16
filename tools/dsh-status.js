@@ -11,6 +11,7 @@ import path from 'node:path';
 import { DshClient } from '../lib/client.js';
 import { SessionRoutes } from '../lib/session-routes.js';
 import { loadTaskLog } from '../lib/task-log.js';
+import { manifestDefault } from '../lib/manifest-defaults.js';
 
 export const name = 'dsh_status';
 
@@ -119,7 +120,7 @@ async function status(ctx) {
   let external = null;
   if (mode !== 'embedded') {
     // external 探测：轻量 GET /（3s 超时），只读，不起任何服务
-    const port = Number(cfg.externalPort || cfg.webPort || 3080);
+    const port = Number(cfg.externalPort || cfg.webPort || manifestDefault('webPort'));
     const healthy = await new DshClient(`http://127.0.0.1:${port}`)
       .health()
       .then(() => true)

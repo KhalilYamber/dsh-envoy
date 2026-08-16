@@ -38,7 +38,7 @@ Hana ：正在派单【0815-01】…（external 模式）
 
 ## 安装（手动解压，已验证）
 
-1. 从 [Releases 页面](https://github.com/KhalilYamber/dsh-envoy/releases) 下载 `dsh-bridge-0.2.3.zip`（或直接用仓库 `dist/` 目录里的同名文件）
+1. 从 [Releases 页面](https://github.com/KhalilYamber/dsh-envoy/releases) 下载最新版 `dsh-bridge-0.2.5.zip`（或直接用仓库 `dist/` 目录里的同名文件）
 2. 解压到 Hana 的插件目录，目录名必须是 `dsh-bridge`：
    - Windows：`C:\Users\<您的用户名>\.hanako\plugins\dsh-bridge`
    - macOS / Linux：`~/.hanako/plugins/dsh-bridge`
@@ -85,7 +85,7 @@ Hana 会：派单前对敏感操作向您预授权问询 → 派单后盯梢 →
 README.md                本文件
 manifest.json            插件清单（版本、配置项）
 index.js                 插件入口
-lib/                     连接抽象、DSH 客户端、headless 运行器、任务状态机、标签
+lib/                     连接抽象、DSH 客户端、headless 运行器、任务状态机、任务记录落盘、会话路由、标签
 tools/                   四个工具：dsh_run / dsh_status / dsh_approve / dsh_cancel
 skills/dsh-bridge/       配套技能（Hana 的操作手册，自动加载）
 dist/                    可安装的插件包
@@ -99,7 +99,7 @@ LICENSE                  MIT
 先看 Hana 是否提示了连接模式与错误。外接模式请确认 DSH 服务在跑（浏览器能打开 127.0.0.1:3080）；内置模式请确认 apiKey 已填、本机 DSH 安装可被探测到。
 
 **Q：内置模式与「跑着 DSH」有什么区别？**
-外接模式直连您日常在用的 DSH（任务记录、会话、界面都是您自己的）；内置模式由插件拉起一次性无界面进程，任务记录隔离在插件数据目录，适合不想跑 DSH 界面的场景。
+外接模式直连您日常在用的 DSH（会话与界面都是您自己的；插件任务记录 tasks.jsonl 在插件数据目录，重启后可查）；内置模式由插件拉起一次性无界面进程，任务与会话记录隔离在插件数据目录，适合不想跑 DSH 界面的场景。
 
 **Q：审批我不想管，能全自动吗？**
 外接模式 180 秒无人应答自动拒绝（可配置 `approvalTimeoutMs`，0 为禁用）；内置模式越界直接拒绝，均不会默默放行。
@@ -115,7 +115,7 @@ LICENSE                  MIT
 
 ## 致谢
 
-本项目开发中借鉴了 [Nyasers/dsh-hanako](https://github.com/Nyasers/dsh-hanako)（DSHana，MIT License）的设计思路：宿主 deferred 通道的调用方式、审批应答的信封结构、任务台账与标签的组织模式。代码为独立重写并换芯（headless 取代 web host），谨此致谢原作者的优秀工作。
+本项目开发中借鉴了 [Nyasers/dsh-hanako](https://github.com/Nyasers/dsh-hanako)（DSHana，MIT License）的设计思路：宿主 deferred 通道的调用方式、审批应答的信封结构、任务记录与标签的组织模式。代码为独立重写并换芯（headless 取代 web host），谨此致谢原作者的优秀工作。
 
 ## License
 

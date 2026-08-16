@@ -34,7 +34,7 @@ Hana 与 DeepSeek Harness（DSH）之间的交接层。DSH 是独立 agent，擅
 
 ### dsh_status(sessionId?)
 
-查进度与任务记录（只读）。返回：连接模式与健康、运行中任务（内置模式显示 headless 进程状态与输出尾部）、近期任务记录（50 条）、挂起审批（外接模式）。
+查进度与任务记录（只读）。返回：连接模式与健康、运行中任务（内置模式显示 headless 进程状态与输出尾部）、近期任务记录（文本展示最近 20 条，details 全量最多 50 条）、挂起审批（外接模式）。
 
 ### dsh_approve(approvalId, outcome?, ...)
 
@@ -120,7 +120,7 @@ deferred 后台结果可能不来（宿主重启等）。用户再次开口问�
 状态徽章配色：completed → `rgba(74,107,74,0.08)` 底 `#4A6B4A` 字；aborted/timeout → `rgba(157,95,77,0.08)` 底 `#9D5F4D` 字；error → `rgba(139,44,31,0.08)` 底 `#8B2C1F` 字；running → `var(--accent-light)` 底 `var(--accent-hover)` 字。
 
 ```html
-<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap">DSH task receipt {tag}</h2>
+<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap">DSH task card {tag}</h2>
 <div style="background:var(--bg-card);border-radius:var(--radius-chat-card);padding:1rem 1.25rem">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:0.6rem">
     <div style="width:40px;height:40px;border-radius:var(--radius-chat-card);background:var(--accent-light);display:flex;align-items:center;justify-content:center;color:var(--accent);font-weight:500;font-family:var(--font-ui)">DSH</div>
@@ -135,6 +135,7 @@ deferred 后台结果可能不来（宿主重启等）。用户再次开口问�
     <div style="min-width:72px"><div style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-ui)">耗时</div><div style="font-size:1.4rem;font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums;font-family:var(--font-ui)">{秒}s</div></div>
     <div style="min-width:72px"><div style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-ui)">输入</div><div style="font-size:1.4rem;font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums;font-family:var(--font-ui)">{n}</div></div>
     <div style="min-width:72px"><div style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-ui)">输出</div><div style="font-size:1.4rem;font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums;font-family:var(--font-ui)">{n}</div></div>
+    <div style="min-width:72px"><div id="cache-label" style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-ui)">缓存命中率</div><div style="display:flex;align-items:center;gap:6px"><div id="cache-val" style="font-size:1.4rem;font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums;font-family:var(--font-ui)">{99%}</div><button id="cache-toggle" style="border:0.5px solid var(--border);border-radius:var(--radius-chat-card);background:transparent;color:var(--accent);padding:1px 6px;font-size:0.7rem;font-family:var(--font-ui);cursor:pointer">切换</button></div></div>
   </div>
   <details style="font-size:0.8rem;font-family:var(--font-ui)">
     <summary style="cursor:pointer;color:var(--text-muted);padding:2px 0">明细</summary>
@@ -145,9 +146,22 @@ deferred 后台结果可能不来（宿主重启等）。用户再次开口问�
     </table>
   </details>
 </div>
+<script>
+  const cacheBtn = document.getElementById('cache-toggle');
+  const cacheLabel = document.getElementById('cache-label');
+  const cacheVal = document.getElementById('cache-val');
+  if (cacheBtn && cacheLabel && cacheVal) {
+    const modes = [
+      { label: '缓存命中率', value: '{99%}' },
+      { label: '缓存增量', value: '{+1280}' },
+    ];
+    let i = 0;
+    cacheBtn.addEventListener('click', () => { i = 1 - i; cacheLabel.textContent = modes[i].label; cacheVal.textContent = modes[i].value; });
+  }
+</script>
 ```
 
-数据缺失处理：usage 为 null 时「输入/输出」格省略（指标区只留耗时）；status=error 时结论下方加「错误：{error 摘要}」；错误摘要也一并折叠进明细区（默认区保持三项）。
+数据缺失处理：usage 为 null 时「输入/输出/缓存」格省略（指标区只留耗时）；缓存命中率 = cacheReadTokens ÷ (inputTokens + cacheReadTokens) 四舍五入百分比；缓存增量 = 本次 cacheReadTokens − 同会话上一条任务（从插件数据目录 tasks.jsonl 按 sessionId 匹配查上一终态）的 cacheReadTokens，正数带 + 号，查不到上一条（新会话首单）时按本次值显示；两者同格互斥显示，标签随切换变（缓存命中率 ⇄ 缓存增量），点「切换」轮换；status=error 时结论下方加「错误：{error 摘要}」；错误摘要也一并折叠进明细区（默认区保持四项）。
 
 ### 审批卡片（发现挂起审批时调用）
 
@@ -211,4 +225,4 @@ deferred 后台结果可能不来（宿主重启等）。用户再次开口问�
 
 - 不碰 DSH 本体，不重复造界面（外接模式的 DSH Web UI 就是观察窗）
 - 不做任务调度队列（一次一个，DSH 自己排）
-- 插件层不做历史落盘、搜索、自建卡片 UI（轻量化）；但Agent行为层用宿主原生 show_card 呈现任务结果与审批卡片（见「卡片模板库」）
+- 插件层不做搜索、自建卡片 UI（轻量化）；历史记录只落终态元数据（tasks.jsonl，重启后 dsh_status 可查）；Agent行为层用宿主原生 show_card 呈现任务结果与审批卡片（见「卡片模板库」）

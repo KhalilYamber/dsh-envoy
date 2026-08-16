@@ -310,9 +310,10 @@ async function run(ctx) {
       : '生效模式：embedded-headless（插件自拉一次性进程，DSH_HOME 隔离于插件数据目录）';
 
   // ---- 2. 标签【MMdd-NN】 ----
-  const labels = new LabelStore(s.dataDir);
+  let labels = null;
   let tag = null;
   try {
+    labels = new LabelStore(s.dataDir); // dataDir 缺失时构造不抛（labels.js 空值防御）
     tag = labels.next(); // 取号失败不阻塞任务
   } catch {
     tag = null;
@@ -382,6 +383,8 @@ async function run(ctx) {
   // 通道不可用不阻塞派单：审批靠前台盯梢 + dsh_status 对账，结果靠主动查询，deferred 只是增强
 
   // 审批挂起回调：每单挂载（闭包携带当单的 opId/bus/sessionPath）；仅 external（headless 无审批事件）
+  // 动机：runner 单例的 onApproval 会被后派单覆盖，审批事件到达时闭包可能属于别的单，
+  //       故按 pending.sessionId 反查 _runs 归属正确 opId（同会话排队时先派单先匹配，与 queue 执行序一致）。
   if (mode !== 'embedded') {
     runner.onApproval = (pending) => {
       // opId 反查：TaskRunner 运行记录 ctx.opKey 即派单时传入的 opId（ctx.sessionId 随会话建立写入）

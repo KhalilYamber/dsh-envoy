@@ -10,6 +10,18 @@
 
 import { SessionRoutes } from '../lib/session-routes.js';
 
+/** 会话路由表：与 dsh-run 共用同一进程内单例（globalThis.__dshBridge.sessionRoutes），
+ *  取消后摘除立即反映到 dsh_run 的路由查询（避免新建实例读旧快照导致复用已取消会话）。 */
+function sharedSessionRoutes(s) {
+  let routes = s?.sessionRoutes ?? null;
+  if (!routes || routes.dataDir !== s?.dataDir) {
+    routes = new SessionRoutes(s?.dataDir);
+    routes.load();
+    if (s) s.sessionRoutes = routes;
+  }
+  return routes;
+}
+
 export const name = 'dsh_cancel';
 
 export const description =
@@ -98,8 +110,7 @@ async function cancel(ctx) {
   const cancelledSid = target.sessionId ?? null;
   if (!embedded && cancelledSid) {
     try {
-      const routes = new SessionRoutes(s.dataDir);
-      routes.load();
+      const routes = sharedSessionRoutes(s);
       const removed = routes.removeBySessionId(cancelledSid);
       if (removed > 0) {
         try {

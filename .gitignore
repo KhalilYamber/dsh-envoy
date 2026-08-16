@@ -1,12 +1,12 @@
-# 依赖与本机数据
+﻿# 依赖与本机数据
 node_modules/
 *.log
 
 # 打包产物（仅保留最新发布包，历史包不提交）
 dist/*.zip
 dist/*.sha256
-!dist/dsh-bridge-0.2.3.zip
-!dist/dsh-bridge-0.2.3.zip.sha256
+!dist/dsh-bridge-0.2.5.zip
+!dist/dsh-bridge-0.2.5.zip.sha256
 
 # 本机备份与内部资料
 backup/
@@ -19,3 +19,4 @@ design.md
 # 系统文件
 .DS_Store
 Thumbs.db
+

@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DshClient } from '../lib/client.js';
+import { SessionRoutes } from '../lib/session-routes.js';
 
 export const name = 'dsh_status';
 
@@ -247,6 +248,19 @@ async function status(ctx) {
     }
   }
 
+  // ---- 4.7 会话路由表（项目级会话延续：cwd → 活跃 sessionId） ----
+  // 只读展示（含更新时间），方便用户观察和判断何时该开新会话（sessionPolicy=new）
+  let routes = {};
+  if (s.dataDir) {
+    try {
+      const routesStore = new SessionRoutes(s.dataDir);
+      routesStore.load();
+      routes = routesStore.all();
+    } catch {
+      routes = {}; // 读取失败静默（路由是增强机制）
+    }
+  }
+
   // ---- 5. 会话查询（外接模式传 sessionId 时尝试从 DSH 查该会话状态） ----
   let session = null;
   let sessionNote = null;
@@ -369,6 +383,20 @@ async function status(ctx) {
       lines.push(sessionNote);
     }
   }
+  const routeEntries = Object.entries(routes);
+  if (routeEntries.length) {
+    lines.push(`会话路由表（${routeEntries.length} 个工程，auto 模式自动延续）：`);
+    for (const [cwd, v] of routeEntries) {
+      const ago =
+        v.updatedAt && Number.isFinite(Date.parse(v.updatedAt))
+          ? `${Math.max(0, Math.round((Date.now() - Date.parse(v.updatedAt)) / 60000))} 分钟前更新`
+          : '更新未知';
+      lines.push(`· ${cwd} → ${String(v.sessionId).slice(0, 12)}…（${ago}）`);
+    }
+    lines.push('想开新会话：对 Agent 说「开新会话」即可（sessionPolicy=new，自动带交接摘要）');
+  } else {
+    lines.push('会话路由表：空（同工程任务将新建会话并自动登记）');
+  }
 
   return {
     content: [{ type: 'text', text: lines.join('\n') }],
@@ -399,6 +427,7 @@ async function status(ctx) {
         reconcile, // P0-1：DSH 侧对账结果 {checked, unknown[]}
         session,
         sessionNote,
+        routes, // 会话路由表（cwd → {sessionId, updatedAt}）
       },
     },
   };

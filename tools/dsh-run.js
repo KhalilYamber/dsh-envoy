@@ -12,6 +12,7 @@ import path from 'node:path';
 import { DshConnection } from '../lib/connection.js';
 import { TaskRunner } from '../lib/task.js';
 import { LabelStore } from '../lib/labels.js';
+import { SessionRoutes } from '../lib/session-routes.js';
 
 export const name = 'dsh_run';
 
@@ -49,7 +50,16 @@ export const parameters = {
     },
     sessionId: {
       type: 'string',
-      description: '复用已有 dsh 会话（resume）：传上次任务的 sessionId 则在该会话继续，agent 保留上文。目标会话应已空闲。仅外接模式支持；内置 headless 模式传此参数会报错',
+      description: '复用已有 dsh 会话（resume）：传上次任务的 sessionId 则在该会话继续，agent 保留上文。目标会话应已空闲。仅外接模式支持；内置 headless 模式传此参数会报错。显式传 sessionId 时优先于 sessionPolicy（不查路由表、不写路由表）',
+    },
+    sessionPolicy: {
+      type: 'string',
+      enum: ['auto', 'new'],
+      description:
+        '会话策略（仅外接模式生效；内置 headless 无会话概念，此参数被忽略）：' +
+        'auto（默认）= 按工作目录（cwd）查会话路由表，该工程有活跃会话则自动复用（内部传 sessionId，agent 保留上文，省 token）；未命中则新建并登记进路由表。' +
+        'new = 强制新建会话；新建前自动从旧会话（同 cwd 的活跃会话，若有）提取交接摘要，拼在任务书开头（这是延续会话…请继续），新会话登记进路由表。' +
+        '何时用 new：DSH 侧上下文太满、旧会话状态混乱、或想干净重来。决定权在用户口头指示，本机制不做自动检测',
     },
     permission: {
       type: 'string',
@@ -65,14 +75,14 @@ export const parameters = {
 
 export const sessionPermission = { kind: 'external_side_effect' };
 
-// ---- deferred 通道（宿主唤醒），调用法与 DSHana 
+// ---- deferred 通道（宿主唤醒），调用法与 DSHana 实物一致 ----
 // 
 //   async function f({bus:e,sessionPath:t,taskId:r,label:s}){if(!e?.request||!t||!r)return!1;try{return await e.request("deferred:register",{taskId:r,sessionPath:t,meta:{type:"dsh-run",label:String(s||""),deliveryIntent:"trigger_parent_turn",notifyAgentOnFailure:!0}}),!0}catch{return!1}}
 //   async function g({bus:e,taskId:t,result:r}){if(!e?.request||!t)return!1;try{return await e.request("deferred:resolve",{taskId:t,result:r}),!0}catch{return!1}}
 //   async function h({bus:e,taskId:t,error:r}){if(!e?.request||!t)return!1;try{return await e.request("deferred:fail",{taskId:t,error:r}),!0}catch{return!1}}
 // 通道不可用（bus 缺 request / 无 sessionPath）时全部静默返回 false，宿主侧降级为仅日志。
 
-/** 任务完成通道注册：taskId=opId，meta.type='dsh-run'（对齐
+/** 任务完成通道注册：taskId=opId，meta.type='dsh-run'（对齐 DSHana 的注册语义） */
 async function registerDeferred({ bus, sessionPath, taskId, label }) {
   if (!bus?.request || !sessionPath || !taskId) return false;
   try {
@@ -92,7 +102,7 @@ async function registerDeferred({ bus, sessionPath, taskId, label }) {
   }
 }
 
-/** 任务完成通道唤醒：result 为结构化终态摘要（对齐
+/** 任务完成通道唤醒：result 为结构化终态摘要（对齐 DSHana 的 resolve 语义） */
 async function resolveDeferred({ bus, taskId, result }) {
   if (!bus?.request || !taskId) return false;
   try {
@@ -103,7 +113,7 @@ async function resolveDeferred({ bus, taskId, result }) {
   }
 }
 
-/** 任务失败通道唤醒（对齐
+/** 任务失败通道唤醒（对齐 DSHana 的 fail 语义） */
 async function failDeferred({ bus, taskId, error }) {
   if (!bus?.request || !taskId) return false;
   try {
@@ -115,7 +125,7 @@ async function failDeferred({ bus, taskId, error }) {
 }
 
 /**
- * 审批挂起通知（对齐
+ * 审批挂起通知（对齐 DSHana 的 m() 原文）：
  *   async function m({bus:e,sessionPath:t,opId:r,approval:s,task:n}){if(!e?.request||!t)return;let o=`${r}::approval::${s.approvalId}`;try{await e.request("deferred:register",{taskId:o,sessionPath:t,meta:{type:"dsh-approval",label:`dsh 审批: ${s.toolName||"tool"}`}}),await e.request("deferred:resolve",{taskId:o,result:{kind:"dsh-approval",opId:r,sessionId:s.sessionId,approvalId:s.approvalId,toolName:s.toolName,callId:s.callId,reason:s.reason??null,args:s.args??null,taskPreview:String(n??"").slice(0,120)}})}catch{}}
  * 独立 taskId=`${opId}::approval::${approvalId}`，与任务完成通道（taskId=opId）分离，不占任务完成回调。
  * 失败或通道不可用时降级为仅日志（审批仍可经 dsh Web UI 人工处理，或由超时自动拒绝兜底）。
@@ -195,7 +205,16 @@ function liveConfig(s) {
   return merged;
 }
 
-/** opId 生成（
+/** 会话路由表（进程内单例；dsh-cancel / dsh-status 共用；dataDir 变化时重建） */
+function sessionRoutes(s) {
+  if (!s.sessionRoutes || s.sessionRoutes.dataDir !== s.dataDir) {
+    s.sessionRoutes = new SessionRoutes(s.dataDir);
+    s.sessionRoutes.load();
+  }
+  return s.sessionRoutes;
+}
+
+/** opId 生成（时间戳 + 随机后缀） */
 function nextOpId() {
   return `op_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
 }
@@ -227,155 +246,21 @@ function doneResult(opId, final, mode) {
 }
 
 async function run(ctx) {
-function singleton(ctx) {
-  const g = globalThis;
-  if (!g.__dshBridge || typeof g.__dshBridge !== 'object') g.__dshBridge = {};
-  const s = g.__dshBridge;
-  // 兜底：Hana 按需加载 tools，工具可能先于 onload 拿到 ctx 字段
-  if (ctx?.bus && !s.bus) s.bus = ctx.bus;
-  if (ctx?.dataDir && !s.dataDir) s.dataDir = ctx.dataDir;
-  if (ctx?.config && !s.cfgSnapshot) s.cfgSnapshot = ctx.config;
-  return s;
-}
-
-function liveConfig(s) {
-  const merged = { ...(s.cfgSnapshot ?? {}) };
-  try {
-    if (s.dataDir) {
-      const file = path.join(s.dataDir, 'config.json');
-      if (fs.existsSync(file)) {
-        const g = JSON.parse(fs.readFileSync(file, 'utf8'))?.global;
-        if (g && typeof g === 'object') {
-          for (const [k, v] of Object.entries(g)) {
-            if (v != null && v !== '') merged[k] = v;
-          }
-        }
-      }
-    }
-  } catch {
-    // config.json 损坏静默，用快照
-  }
-  return merged;
-}
-
-function nextOpId() {
-  return `op_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
-}
-
-function ledger(s) {
-  if (!s.ops) s.ops = new Map();
-  return s.ops;
-}
-
-function doneResult(opId, final, mode) {
-  return {
-    kind: 'dsh-done',
-    opId,
-    tool: 'dsh_run',
-    tag: final?.tag ?? null,
-    sessionId: final?.sessionId ?? null,
-    mode,
-    status: final?.status ?? 'error',
-    stopReason: final?.stopReason ?? null,
-    conclusion: String(final?.conclusion ?? '').slice(0, 4000), // design.md：结论 ≤4000 字符
-    checkpoints: final?.checkpoints ?? [],
-    artifacts: final?.artifacts ?? [],
-    usage: final?.usage ?? null,
-    durationMs: final?.durationMs ?? null,
-    ...(final?.error ? { error: final.error } : {}),
-  };
-}
-
-async function registerDeferred({ bus, sessionPath, taskId, label }) {
-  if (!bus?.request || !sessionPath || !taskId) return false;
-  try {
-    await bus.request('deferred:register', {
-      taskId,
-      sessionPath,
-      meta: {
-        type: 'dsh-run',
-        label: String(label || ''),
-        deliveryIntent: 'trigger_parent_turn',
-        notifyAgentOnFailure: true,
-      },
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function resolveDeferred({ bus, taskId, result }) {
-  if (!bus?.request || !taskId) return false;
-  try {
-    await bus.request('deferred:resolve', { taskId, result });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function failDeferred({ bus, taskId, error }) {
-  if (!bus?.request || !taskId) return false;
-  try {
-    await bus.request('deferred:fail', { taskId, error });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function notifyApproval({ bus, sessionPath, opId, approval, task, log }) {
-  if (!bus?.request || !sessionPath || !opId) {
-    try {
-      log?.warn?.(
-        `[dsh-bridge] deferred 通道不可用，审批 ${approval?.approvalId ?? '?'} 无法通知宿主（仅记录日志）`
-      );
-    } catch {
-      // 日志失败静默
-    }
-    return;
-  }
-  const taskId = `${opId}::approval::${approval.approvalId}`;
-  try {
-    await bus.request('deferred:register', {
-      taskId,
-      sessionPath,
-      meta: { type: 'dsh-approval', label: `dsh 审批: ${approval.toolName || 'tool'}` },
-    });
-    await bus.request('deferred:resolve', {
-      taskId,
-      result: {
-        kind: 'dsh-approval',
-        opId,
-        sessionId: approval.sessionId ?? null,
-        approvalId: approval.approvalId,
-        toolName: approval.toolName ?? null,
-        callId: approval.callId ?? null,
-        reason: approval.reason ?? null,
-        args: approval.args ?? null,
-        taskPreview: String(task ?? '').slice(0, 120),
-      },
-    });
-  } catch (e) {
-    try {
-      log?.warn?.(`[dsh-bridge] 审批 deferred 通知失败：${e?.message || e}`);
-    } catch {
-      // 日志失败静默
-    }
-  }
-}
-
   const s = singleton(ctx);
   const cfg = liveConfig(s);
   const sessionPath = ctx?.sessionPath ?? null;
   const bus = ctx?.bus ?? s.bus ?? null;
 
-  // ---- 参数处理：宿主把工具参数铺在 ctx 上（对齐 DSHana 
+  // ---- 参数处理：宿主把工具参数铺在 ctx 上（对齐 DSHana 实物：execute(ctx) 单参）----
   const task = String(ctx?.task ?? '').trim();
   if (!task) throw new Error('task 不能为空：请给出要 dsh 执行的任务书文本');
   const sidParam = String(ctx?.sessionId ?? '').trim() || null;
   const cwd = String(ctx?.cwd ?? '').trim() || String(cfg.defaultCwd ?? '').trim() || '';
+  const policyRaw = String(ctx?.sessionPolicy ?? '').trim();
+  const policy = policyRaw ? policyRaw : 'auto';
+  if (!['auto', 'new'].includes(policy)) {
+    throw new Error('sessionPolicy 只支持 auto / new');
+  }
   const timeoutSec = Number(ctx?.timeout);
   const timeoutMs =
     Number.isFinite(timeoutSec) && timeoutSec > 0 ? Math.round(timeoutSec * 1000) : undefined;
@@ -439,6 +324,7 @@ async function notifyApproval({ bus, sessionPath, opId, approval, task, log }) {
         '内置 headless 模式不支持 resume：每次任务都是全新独立会话（无会话句柄）。外接模式才可传 sessionId'
       );
     }
+    // 内置模式无会话概念：sessionPolicy 不生效（行为与现状一致，不报错）
     runner = conn.headless;
     s.runner = runner;
   } else {
@@ -476,18 +362,19 @@ async function notifyApproval({ bus, sessionPath, opId, approval, task, log }) {
     startedAt: new Date().toISOString(),
     sessionId: sidParam,
     wait: isSync,
+    policy: mode === 'embedded' ? null : policy, // 会话策略（路由决策人话留到执行段）
     output: null,
     approvals: [], // P0-1：审批历史（TaskRunner 挂起/解决/自动拒绝时写入，任务结束后保留）
   };
   ops.set(opId, entry);
   while (ops.size > 50) {
-    // 台账裁剪（对齐
+    // 台账裁剪（对齐实物：仅保留最近 50 条）
     const oldest = ops.keys().next().value;
     if (!oldest) break;
     ops.delete(oldest);
   }
 
-  // ---- 5. 派单前的通道准备（deferred register 先行，
+  // ---- 5. 派单前的通道准备（deferred register 先行，不阻塞派单）
   // bus/sessionPath 已在 run() 开头从合并 ctx 提取（宿主 execute(input, ctx) 双参约定，第二参含会话上下文）
   // 通道不可用不阻塞派单：审批靠前台盯梢 + dsh_status 对账，结果靠主动查询，deferred 只是增强
 
@@ -515,12 +402,49 @@ async function notifyApproval({ bus, sessionPath, opId, approval, task, log }) {
     };
   }
 
+  // ---- 5.5 会话策略决策（仅 external；embedded 已在上方忽略） ----
+  // 优先级：显式 sessionId > sessionPolicy（auto/new）；无 cwd 时路由不生效（按现状新建）
+  const routes = sessionRoutes(s);
+  let routeCwd = null; // 参与路由的 cwd（null = 不查表不写表）
+  let routeAction = null; // 人话：reuse / create / new-with-handoff / new-no-old / reuse-failed-recreated / explicit / ignored
+  let resumeSid = sidParam; // 实际传给 runner 的 sessionId（auto 命中时从路由表取）
+  let effectiveTask = task; // new 模式带交接前缀的任务书
+
+  if (mode !== 'embedded') {
+    if (sidParam) {
+      routeAction = 'explicit'; // 显式 resume：不查表不写表（现有行为不变）
+    } else if (cwd) {
+      if (policy === 'new') {
+        const oldSid = routes.get(cwd);
+        if (oldSid) {
+          const handoff = await buildHandoff(oldSid, conn.client, ctx?.log); // 10s 超时降级
+          effectiveTask = `${handoff}\n\n${task}`;
+          routeAction = 'new-with-handoff';
+        } else {
+          routeAction = 'new-no-old';
+        }
+      } else {
+        const hit = routes.get(cwd);
+        if (hit) {
+          resumeSid = hit;
+          routeAction = 'reuse';
+        } else {
+          routeAction = 'create';
+        }
+      }
+      routeCwd = cwd;
+    }
+  } else {
+    routeAction = 'ignored'; // 内置模式无会话延续
+  }
+  entry.routeAction = routeAction; // 台账留痕
+
   // ---- 6. 执行 ----
-  const runPromise = runner.run({
-    task,
+  const runOptions = {
+    task: effectiveTask,
     cwd: cwd || undefined,
     tag: tag ?? undefined,
-    sessionId: sidParam ?? undefined,
+    sessionId: resumeSid ?? undefined,
     timeoutMs,
     opId,
     signal: ctx?.signal ?? undefined, // 宿主中断联动（协议实测 5.3 的 abort）
@@ -533,9 +457,22 @@ async function notifyApproval({ bus, sessionPath, opId, approval, task, log }) {
       if (p?.sessionId) e.sessionId = p.sessionId; // P0-1：会话一建立就落台账（对账匹配键）
       if (p?.output != null) e.output = String(p.output).slice(-8000); // 输出尾部滚动，供 dsh_status
     },
-  });
+  };
+  // auto 复用：若 DSH 侧返回会话不存在/已归档，自动摘除路由并用新会话重跑一次（不无限重试）
+  const runOnce = (sid) =>
+    runner.run({ ...runOptions, sessionId: sid ?? undefined });
+  let runPromise = runOnce(resumeSid);
+  if (routeCwd && routeAction === 'reuse') {
+    runPromise = runPromise.catch((e) => {
+      if (!isSessionGone(e)) throw e;
+      routes.remove(routeCwd); // 路由失效：摘除
+      routeAction = 'reuse-failed-recreated';
+      entry.routeAction = routeAction;
+      return runOnce(null); // 自动新建（不带摘要；旧会话已失效，无背景可交接）
+    });
+  }
 
-  // 终态落地到台账
+  // 终态落地到台账（含路由登记：任务结束拿到真实 sessionId 后登记/刷新路由表）
   const settle = async (final) => {
     const e = ops.get(opId);
     if (e) {
@@ -547,6 +484,10 @@ async function notifyApproval({ bus, sessionPath, opId, approval, task, log }) {
       e.endedAt = new Date().toISOString();
       if (final?.error) e.error = String(final.error).slice(0, 2000);
       delete e.output; // 终态后完整输出见结构化结果 / details
+    }
+    // 路由登记：拿到真实 sessionId 且该 cwd 参与路由（auto 新建 / new / 复用均刷新时间戳）
+    if (routeCwd && final?.sessionId && mode !== 'embedded') {
+      routes.set(routeCwd, final.sessionId);
     }
   };
 
@@ -573,7 +514,7 @@ async function notifyApproval({ bus, sessionPath, opId, approval, task, log }) {
         await failDeferred({ bus, taskId: opId, error: { message: msg.slice(0, 300) } });
       }
     );
-    await registerPromise; // 对齐
+    await registerPromise; // 对齐实物：register 落地后再返回（失败/不可用也照常返回）
     // P0-2：工具返回文本直接嵌入下一步指令（Agent 必读，不依赖 SKILL 自觉）
     const followup =
       mode === 'embedded'
@@ -588,17 +529,31 @@ async function notifyApproval({ bus, sessionPath, opId, approval, task, log }) {
           type: 'text',
           text:
             `已派单【${tag ?? '??'}】任务（opId: ${opId}${sidParam ? `，resume 会话 ${sidParam}` : ''}）。${modeLine}` +
+            `${routeActionText(routeAction, resumeSid)}` +
             `完成后宿主经后台消息带回结果；进度与台账可随时用 dsh_status 查看，止损用 dsh_cancel。${followup}`,
         },
       ],
       details: {
-        dsh: { opId, tag, sessionId: sidParam, status: 'running', mode, wait: false },
+        dsh: { opId, tag, sessionId: sidParam, status: 'running', mode, wait: false, policy, routeAction },
       },
     };
   }
 
-  // ---- 同步模式（wait=true）：直接等终态返回 ----
-  const final = await runPromise;
+  // ---- 同步模式（wait=true）：直接等终态返回（复用失败自动新建与异步同逻辑） ----
+  let final;
+  try {
+    final = await runPromise;
+  } catch (e) {
+    if (routeCwd && routeAction === 'reuse' && isSessionGone(e)) {
+      // 与异步路径相同的降级：摘除失效路由，自动新建一次
+      routes.remove(routeCwd);
+      routeAction = 'reuse-failed-recreated';
+      entry.routeAction = routeAction;
+      final = await runOnce(null);
+    } else {
+      throw e;
+    }
+  }
   await settle(final);
   const conclusion = String(final?.conclusion ?? '');
   const head = conclusion ? conclusion.slice(0, 4000) : '（dsh 未返回文本）';
@@ -616,7 +571,8 @@ async function notifyApproval({ bus, sessionPath, opId, approval, task, log }) {
         type: 'text',
         text:
           `【${final?.tag ?? tag ?? '??'}】${head}${statusLine}${syncNote}` +
-          `\n${modeLine}`,
+          `\n${modeLine}` +
+          `${routeActionText(routeAction, final?.sessionId ?? resumeSid)}`,
       },
     ],
     details: {
@@ -634,6 +590,8 @@ async function notifyApproval({ bus, sessionPath, opId, approval, task, log }) {
         usage: final?.usage ?? null,
         durationMs: final?.durationMs ?? null,
         wait: true,
+        policy,
+        routeAction,
         ...(final?.error ? { error: final.error } : {}),
       },
     },
@@ -675,5 +633,123 @@ export function closeProcess() {
   const conn = s?.connection;
   if (conn && typeof conn.dispose === 'function') {
     return Promise.resolve(conn.dispose()).catch(() => {});
+  }
+}
+
+// ---- 会话策略辅助（项目级会话延续机制） ----
+
+const HANDOFF_TIMEOUT_MS = 10_000; // 交接摘要提取超时（不阻塞主流程太久）
+const HANDOFF_MAX_CHARS = 500; // 交接摘要长度上限（避免新会话开局背上大坨旧上下文）
+
+/** 带超时的 Promise（超时 reject，不悬挂） */
+function withTimeout(promise, ms, msg) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(msg)), ms)),
+  ]);
+}
+
+/** 从 history 事件数组提取最近的有效消息文本（assistant/message 事件，文本在 message.content[].text，与 task.js consume 读取方式一致） */
+function extractLastTexts(events) {
+  const texts = [];
+  for (const item of Array.isArray(events) ? events : []) {
+    const ev = item?.event ?? item;
+    if (!ev || typeof ev !== 'object') continue;
+    const t = ev.type;
+    if (t !== 'assistant/message' && t !== 'turn/end' && t !== 'message') continue;
+    let text = '';
+    // 与 task.js 一致的读取链：ev.message ?? ev.data.message，content 数组过滤 text 拼接
+    const msg = ev.message ?? (ev.data && ev.data.message);
+    if (msg && typeof msg === 'object') {
+      if (Array.isArray(msg.content)) {
+        text = msg.content
+          .filter((b) => b && b.type === 'text' && typeof b.text === 'string')
+          .map((b) => b.text)
+          .join('');
+      } else if (typeof msg.content === 'string') {
+        text = msg.content;
+      }
+    }
+    if (!text && typeof ev.data === 'string') text = ev.data; // 兜底：data 为字符串的直接用
+    text = String(text ?? '').trim();
+    if (text) texts.push(text);
+  }
+  return texts;
+}
+
+/** 拼接交接摘要（500 字内，取最近 3 条有效消息） */
+function clipHandoff(text) {
+  const t = String(text ?? '').trim();
+  if (!t) return '';
+  return t.length > HANDOFF_MAX_CHARS ? `${t.slice(0, HANDOFF_MAX_CHARS)}…` : t;
+}
+
+/**
+ * 从旧会话提取交接摘要，拼成任务书前缀：
+ * 「这是延续会话 <旧sessionId> 的工作。旧会话背景摘要：<摘要>。请继续：<当前任务>」
+ * 提取失败降级：仅注明延续会话 + 尽力附旧会话最后一条消息（都失败则只注明）。
+ * 全程受 10s 超时保护，绝不阻塞派单主流程。
+ */
+async function buildHandoff(oldSid, client, log) {
+  const warn = (m) => {
+    try {
+      log?.warn?.(m);
+    } catch {
+      // 日志失败静默
+    }
+  };
+  const fetchTexts = async () => {
+    const events = await withTimeout(
+      client.history(oldSid),
+      HANDOFF_TIMEOUT_MS,
+      '交接摘要提取超时'
+    );
+    const texts = extractLastTexts(events);
+    if (!texts.length) throw new Error('旧会话无可提取的消息');
+    return texts;
+  };
+  try {
+    const texts = await fetchTexts();
+    return `这是延续会话 ${oldSid} 的工作。旧会话背景摘要：${clipHandoff(texts.slice(-3).join('\n'))}。请继续：`;
+  } catch (e) {
+    warn(`[dsh-bridge] 交接摘要提取失败（${e?.message || e}），降级为仅注明延续`);
+    // 降级：尽力附旧会话最后一条消息
+    try {
+      const texts = await fetchTexts();
+      const last = texts[texts.length - 1] ?? '';
+      if (last) {
+        return `这是延续会话 ${oldSid} 的工作。旧会话背景摘要：${clipHandoff(last)}。请继续：`;
+      }
+    } catch {
+      // 降级失败：仅注明延续
+    }
+    return `这是延续会话 ${oldSid} 的工作。请继续：`;
+  }
+}
+
+/** 会话失效判定（auto 复用失败时触发自动新建的凭据） */
+function isSessionGone(e) {
+  const msg = String(e?.message || e);
+  return /not ?found|不存在|未找到|archived|已归档|invalid session/i.test(msg);
+}
+
+/** 路由动作的人话说明（拼进返回文本；explicit / ignored 输出空串） */
+function routeActionText(action, sid) {
+  const short = sid ? String(sid).slice(0, 12) : null;
+  switch (action) {
+    case 'reuse':
+      return `，延续工程会话 ${short ? `${short}…` : ''}`;
+    case 'create':
+      return '，已登记新工程会话（后续同工程任务将自动延续）';
+    case 'new-with-handoff':
+      return '，已开新会话（任务书已附带旧会话交接摘要）';
+    case 'new-no-old':
+      return '，已开新会话（无旧会话可交接）';
+    case 'reuse-failed-recreated':
+      return '，旧会话已失效，自动新建并登记新会话';
+    case 'explicit':
+    case 'ignored':
+    default:
+      return '';
   }
 }

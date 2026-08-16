@@ -23,11 +23,12 @@ Hana 与 DeepSeek Harness（DSH）之间的交接层。DSH 是独立 agent，擅
 
 ## 工具速查
 
-### dsh_run(task, cwd?, timeout?, wait?, sessionId?, permission?)
+### dsh_run(task, cwd?, timeout?, wait?, sessionId?, sessionPolicy?, permission?)
 
 派活。`task` 为任务书文本（自包含：目标、约束、验收检查点、产物位置）。默认异步（立即返回 `{ tag, opId, status: 'running' }`，完成后宿主唤醒）；`wait=true` 同步等结果。
 
-- `sessionId` 仅外接模式支持（resume）；内置模式传了会报错。
+- `sessionId` 仅外接模式支持（resume）；内置模式传了会报错。显式传 sessionId 时优先于 sessionPolicy（不查路由表、不写路由表）。
+- `sessionPolicy` 仅外接模式生效：`auto`（默认）= 按 cwd 查会话路由表，同工程有活跃会话则自动复用（省 token）；未命中则新建并登记。`new` = 强制新建会话，自动从旧会话提取交接摘要拼进任务书开头。何时用 new：DSH 上下文太满、旧会话状态混乱、想干净重来（决定权在用户口头指示）。
 - `permission` 仅内置模式生效：`workspace-write`（默认）/ `danger-full-access`（带授权重派）/ `read-only`。
 - 完成时返回结构化结果：`{ ok, tag, opId, mode, status, conclusion, checkpoints, artifacts, usage, durationMs }`。
 
@@ -52,6 +53,14 @@ Hana 与 DeepSeek Harness（DSH）之间的交接层。DSH 是独立 agent，擅
 ### 0. 派单后盯梢（无条件必做，不依赖任何提示）
 
 外部模式异步派单后，**必须**立即执行盯梢循环：用 `exec_command` 等待 15~20 秒 → 调 `dsh_status` → 若发现挂起审批，转第 4 步内联问询；未发现审批且任务未结束，再盯 1~2 轮（共最多 5 轮）。轮询到上限还没结果就如实告知用户「任务仍在跑」，不要无限等。内置 headless 模式无审批，等待终态即可，可用 `dsh_status` 对账。
+
+### 0.5 会话延续（项目级路由，仅外接模式，派单前想一下）
+
+- 默认 `sessionPolicy=auto`：按 cwd 查路由表，同工程已有活跃会话则自动复用（不传 sessionId，内部自动续用；DSH 保留上文，省去重复读项目的 token）。首次派单自动新建并登记。
+- 何时该用 `sessionPolicy=new`（问用户或用户主动说）：DSH 侧上下文太满、旧会话状态混乱、想干净重来。new 会自动从旧会话提取交接摘要拼进任务书开头（「这是延续会话…旧会话背景摘要…请继续」），新会话登记进路由表。
+- 显式传 sessionId 时优先（不查表不写表）。取消任务（dsh_cancel）后对应路由自动摘除。
+- 查看路由：dsh_status 会展示「会话路由表（cwd → sessionId）」，方便判断何时该开新会话。
+- 内置 headless 模式无会话概念，sessionPolicy 不生效（行为与现状一致）。
 
 ### 1. 派单前：任务分级与复述对齐（必做，机制细节不明说给用户）
 
@@ -79,7 +88,6 @@ Hana 与 DeepSeek Harness（DSH）之间的交接层。DSH 是独立 agent，擅
 任务可能触碰工作区外/敏感路径时（读 system 敏感文件、写工作区外、装全局依赖、执行危险命令等），先问用户一句，例如：「DSH 可能需要在 XX 写文件，允许吗？」得到允许后把授权写进任务书（例如「用户已授权写入 XX」），必要时同步传 `permission=danger-full-access`。没把握该不该问的，就问。
 
 ### 3. 派单后：前台盯梢
-
 异步派单后，同一回合内用 `exec_command sleep 15-20s` 短间隔 + `dsh_status` 轮询，直到出现其一：发现挂起审批（外接）/ 任务终态 / 轮询上限（最多 5 轮）。轮询到上限还没结果就如实告知用户「任务仍在跑」，不要无限等。
 
 ### 4. 发现审批（外接模式）：内联问询 + 审批小卡片

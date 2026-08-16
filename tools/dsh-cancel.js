@@ -5,7 +5,10 @@
 //       外接任务状态机收到中断后补发 session.cancel，终态 aborted，协议实测 5.3；
 //       内置 headless 直接 taskkill 进程树）
 //       → 台账标记 cancelling（终态落地时被 aborted/error 覆盖）→ 返回取消结果。
+//       → 会话路由摘除（取消即废弃：该会话不再作为同工程的延续目标）。
 // 幂等：无运行任务 / 目标不存在均返回「无需取消」，不报错。
+
+import { SessionRoutes } from '../lib/session-routes.js';
 
 export const name = 'dsh_cancel';
 
@@ -42,7 +45,7 @@ function findTarget(runner, sid) {
 async function cancel(ctx) {
   const s = globalThis.__dshBridge ?? {};
   const runner = s.runner;
-  // 宿主把工具参数铺在 ctx 上（对齐 DSHana 
+  // 宿主把工具参数铺在 ctx 上（对齐 DSHana 实物）
   const sidRaw = ctx?.sessionId != null ? String(ctx.sessionId).trim() : '';
   const sid = sidRaw || null;
 
@@ -91,7 +94,26 @@ async function cancel(ctx) {
   const ok = runner.cancelRequested(target.opKey ?? target.sessionId ?? sid);
   const embedded = (s.connection?.effectiveMode ?? null) === 'embedded';
 
-  // 台账标记 cancelling（对齐；终态落地时被 aborted/error 覆盖）
+  // 会话路由摘除（取消即废弃：该会话不再作为同工程的延续目标；embedded 无会话概念跳过）
+  const cancelledSid = target.sessionId ?? null;
+  if (!embedded && cancelledSid) {
+    try {
+      const routes = new SessionRoutes(s.dataDir);
+      routes.load();
+      const removed = routes.removeBySessionId(cancelledSid);
+      if (removed > 0) {
+        try {
+          ctx?.log?.info?.(`[dsh-bridge] 取消后已摘除 ${removed} 条会话路由（sessionId ${String(cancelledSid).slice(0, 12)}…）`);
+        } catch {
+          // 日志失败静默
+        }
+      }
+    } catch {
+      // 路由摘除失败静默（不影响取消本身）
+    }
+  }
+
+  // 台账标记 cancelling（对齐实物 cancelledRequested 语义；终态落地时被 aborted/error 覆盖）
   try {
     const entry = s.ops?.get(target.opKey);
     if (entry && entry.status === 'running') entry.status = 'cancelling';

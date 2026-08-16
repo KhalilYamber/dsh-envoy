@@ -1,7 +1,7 @@
 // dsh-approve.js —— 审批应答工具（dsh_approve）
 // 协议细节以 DSH 官方实现与实测行为为准（DSH 0.1.0-rc.6）。
 // 校验链：approvalId 必填 → 单例 runner 存在（否则报「无运行中的 dsh 任务」）
-//   → respondApproval 内已含完整校验（对齐
+//   → respondApproval 内已含完整校验（对齐 TaskRunner 的校验链）：
 //     审批存在 → 状态必须 pending（已应答/已解决拒答）→ POST /api/respond 被接受（accepted:true）
 //   → 应答成功本地置 answered。三类错误（不存在/已应答/应答未接受）信息已是人话，直接抛出。
 // 内置 headless 模式：无审批可答（越界 fail closed），返回说明性文本，不报错（SPEC-v0.2 T5）。
@@ -73,7 +73,7 @@ async function approve(ctx) {
   if (!runner || typeof runner.respondApproval !== 'function') {
     throw new Error('无运行中的 dsh 任务：尚未派单或任务已全部收尾（先调 dsh_run 派一单）');
   }
-  // 宿主把工具参数铺在 ctx 上（对齐 DSHana 
+  // 宿主把工具参数铺在 ctx 上（对齐 DSHana 实物：approve 的 ctx 字段）
   const approvalId = String(ctx?.approvalId ?? '').trim();
   if (!approvalId) throw new Error('approvalId 必填（审批通知里带）');
   const outcome = ctx?.outcome === 'rejected' ? 'rejected' : 'allowed-once';

@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "dsh-bridge",
   "name": "DSH Envoy",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "DSH Envoy：Hana 与 DeepSeek Harness（DSH）的交接层。一个连接抽象，两种实现：内置（headless 一次性进程，账本隔离）或外接（直连您自跑的 DSH，账本归您）。四个工具：dsh_run 派活、dsh_status 查进度、dsh_approve 应答审批、dsh_cancel 止损。工作标签【MMdd-NN】分组，会话可续跑。审批：外接模式同步到 Hana 内联问询（180s 无人应答自动拒绝），内置模式越界即拒（可带授权重派）。",
   "author": "Khalil",
   "minAppVersion": "0.82.0",

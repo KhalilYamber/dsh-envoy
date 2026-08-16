@@ -9,7 +9,7 @@ Hana 与 DeepSeek Harness（DSH）之间的交接层。DSH 是独立 agent，擅
 
 ## 双连接模式
 
-| 模式 | 含义 | 账本位置 |
+| 模式 | 含义 | 会话记录位置 |
 |---|---|---|
 | external（外接） | 直连用户自跑的 DSH（默认 127.0.0.1:3080） | 用户自己的 DSH 目录 |
 | embedded（内置） | 插件用 headless 模式拉起 dsh（无界面、无端口、无审批通道） | 插件数据目录 dsh-home/ |
@@ -34,7 +34,7 @@ Hana 与 DeepSeek Harness（DSH）之间的交接层。DSH 是独立 agent，擅
 
 ### dsh_status(sessionId?)
 
-查进度与台账（只读）。返回：连接模式与健康、运行中任务（内置模式显示 headless 进程状态与输出尾部）、近期台账（50 条）、挂起审批（外接模式）。
+查进度与任务记录（只读）。返回：连接模式与健康、运行中任务（内置模式显示 headless 进程状态与输出尾部）、近期任务记录（50 条）、挂起审批（外接模式）。
 
 ### dsh_approve(approvalId, outcome?, ...)
 
@@ -92,11 +92,11 @@ Hana 与 DeepSeek Harness（DSH）之间的交接层。DSH 是独立 agent，擅
 
 ### 4. 发现审批（外接模式）：内联问询 + 审批小卡片
 
-调 `show_card` 呈现审批小卡片（模板见「卡片模板库」B 型），卡片外正文问用户：「用户，DSH 申请越界执行（见卡片），允许一次吗？」用户答复后调 `dsh_approve`。用户拒绝就传 `outcome=rejected`。注意 `args`（命令原文）是决策依据，reason 只是 agent 自述。审批消解后无需更新卡片，正文补一句结果即可。
+调 `show_card` 呈现审批卡片（模板见「卡片模板库」审批卡片），卡片外正文问用户：「用户，DSH 申请越界执行（见卡片），允许一次吗？」用户答复后调 `dsh_approve`。用户拒绝就传 `outcome=rejected`。注意 `args`（命令原文）是决策依据，reason 只是 agent 自述。审批消解后无需更新卡片，正文补一句结果即可。
 
 ### 5. 任务终态：转述 + 重派
 
-- 先调 `show_card` 呈现任务回执卡片（模板见「卡片模板库」A 型，按终态选状态徽章色），卡片外正文附一句简洁转述（结论 + DSH 报告要点）。DSH 的完整验证报告放正文，不要塞进卡片。
+- 先调 `show_card` 呈现任务卡片（模板见「卡片模板库」任务卡片，按终态选状态徽章色），卡片外正文附一句简洁转述（结论 + DSH 报告要点）。DSH 的完整验证报告放正文，不要塞进卡片。
 - 按 checkpoints 逐项实测验收后再向用户汇报。
 - 内置模式下 agent 报告被拒（越界）：「DSH 申请执行 XX 被沙箱拒绝。若您允许，Agent带授权重派（permission=danger-full-access）」。
 - 外接模式同样话术换成「审批超时被自动拒绝」。
@@ -107,45 +107,49 @@ Hana 与 DeepSeek Harness（DSH）之间的交接层。DSH 是独立 agent，擅
 
 ### 6. 兜底：对账先行
 
-deferred 后台回执可能不来（宿主重启等）。用户再次开口问任务时，先 `dsh_status` 对账再答话，不要说「还在跑」这类没核实的判断。
+deferred 后台结果可能不来（宿主重启等）。用户再次开口问任务时，先 `dsh_status` 对账再答话，不要说「还在跑」这类没核实的判断。
 
 ## 卡片模板库（show_card，Hana 原生卡片）
 
-回执与审批均用 `show_card` 呈现（卡片随界面主题自动变色，全部颜色走 CSS 变量）。调用前若未加载过设计手册，先调 `hana_card_guide`。硬规则：无 emoji、无注释、内联样式、内嵌标题用 sr-only 样式、表格字体用 var(--font-ui)、数字四舍五入、徽章色只选状态对应色。
+任务结果与审批均用 `show_card` 呈现（卡片随界面主题自动变色，全部颜色走 CSS 变量）。调用前若未加载过设计手册，先调 `hana_card_guide`。硬规则：无 emoji、无注释、内联样式、内嵌标题用 sr-only 样式、表格字体用 var(--font-ui)、数字四舍五入、徽章色只选状态对应色。
 
-### A 型：任务回执卡片（dsh-done 到达或盯梢发现终态时调用）
+### 任务卡片（任务完成时调用）
+
+设计原则：默认只显示最常用的三项（状态、耗时、输入/输出），其余全部折叠（`<details>`，展开才看），保持卡片体积最小。
 
 状态徽章配色：completed → `rgba(74,107,74,0.08)` 底 `#4A6B4A` 字；aborted/timeout → `rgba(157,95,77,0.08)` 底 `#9D5F4D` 字；error → `rgba(139,44,31,0.08)` 底 `#8B2C1F` 字；running → `var(--accent-light)` 底 `var(--accent-hover)` 字。
 
 ```html
 <h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap">DSH task receipt {tag}</h2>
 <div style="background:var(--bg-card);border-radius:var(--radius-chat-card);padding:1rem 1.25rem">
-  <div style="display:flex;align-items:center;gap:12px;margin-bottom:0.9rem">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:0.6rem">
     <div style="width:40px;height:40px;border-radius:var(--radius-chat-card);background:var(--accent-light);display:flex;align-items:center;justify-content:center;color:var(--accent);font-weight:500;font-family:var(--font-ui)">DSH</div>
     <div style="flex:1">
-      <div style="font-weight:500;color:var(--text);font-family:var(--font-serif);font-size:1.05rem">DSH 任务回执 · {tag}</div>
-      <div style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-ui)">{sessionId 前 12 字符}… · {mode} · {秒}s</div>
+      <div style="font-weight:600;color:var(--text);font-family:var(--font-serif);font-size:1.05rem">{tag}</div>
+      <div style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-ui)">{mode}</div>
     </div>
     <span style="display:inline-flex;padding:2px 8px;font-size:0.75rem;font-weight:500;border-radius:var(--radius-chat-card);font-family:var(--font-ui);background:{状态底色};color:{状态字色}">{status}</span>
   </div>
-  <div style="display:flex;flex-wrap:wrap;gap:12px 20px;margin-bottom:0.9rem">
+  <div style="font-size:0.9rem;color:var(--text);font-family:var(--font-ui);line-height:1.5;margin-bottom:0.7rem">{conclusion 前 80 字；空则显示「（dsh 未返回文本）」；status=error 时后面加一行错误摘要}</div>
+  <div style="display:flex;flex-wrap:wrap;gap:12px 20px;margin-bottom:0.5rem">
     <div style="min-width:72px"><div style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-ui)">耗时</div><div style="font-size:1.4rem;font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums;font-family:var(--font-ui)">{秒}s</div></div>
     <div style="min-width:72px"><div style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-ui)">输入</div><div style="font-size:1.4rem;font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums;font-family:var(--font-ui)">{n}</div></div>
     <div style="min-width:72px"><div style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-ui)">输出</div><div style="font-size:1.4rem;font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums;font-family:var(--font-ui)">{n}</div></div>
-    <div style="min-width:72px"><div style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-ui)">缓存命中</div><div style="font-size:1.4rem;font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums;font-family:var(--font-ui)">{n}</div></div>
-    <div style="min-width:72px"><div style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-ui)">审批</div><div style="font-size:1.4rem;font-weight:600;color:#9D5F4D;font-variant-numeric:tabular-nums;font-family:var(--font-ui)">{n}</div></div>
   </div>
-  <table style="width:100%;border-collapse:collapse;font-size:0.85rem;font-family:var(--font-ui)">
-    <tr><td style="padding:5px 8px;color:var(--text-muted);width:30%">交付物</td><td style="padding:5px 8px;color:var(--text)">{artifacts 首个或 conclusion 里的产物路径}</td></tr>
-    <tr><td style="padding:5px 8px;color:var(--text-muted)">结论</td><td style="padding:5px 8px;color:var(--text)">{conclusion 前 80 字}</td></tr>
-    <tr><td style="padding:5px 8px;color:var(--text-muted)">审批记录</td><td style="padding:5px 8px;color:var(--text)">{放行 x 次 · 拒绝 y 次 · 已消解 z 次；无则「无」}</td></tr>
-  </table>
+  <details style="font-size:0.8rem;font-family:var(--font-ui)">
+    <summary style="cursor:pointer;color:var(--text-muted);padding:2px 0">明细</summary>
+    <table style="width:100%;border-collapse:collapse;font-size:0.85rem;font-family:var(--font-ui);margin-top:0.4rem">
+      <tr><td style="padding:5px 8px;color:var(--text-muted);width:30%">交付物</td><td style="padding:5px 8px;color:var(--text)">{artifacts 首个或 conclusion 里解析的产物路径；解析不到整行省略}</td></tr>
+      <tr><td style="padding:5px 8px;color:var(--text-muted)">审批记录</td><td style="padding:5px 8px;color:var(--text)">{放行 x 次 · 拒绝 y 次；无则整行省略}</td></tr>
+      <tr><td style="padding:5px 8px;color:var(--text-muted)">会话</td><td style="padding:5px 8px;color:var(--text)">{sessionId 前 12 字符}…（{mode}）</td></tr>
+    </table>
+  </details>
 </div>
 ```
 
-数据缺失处理：usage 为 null 时指标区只留「耗时」与「审批」；artifacts 为空时「交付物」行用 conclusion 里解析的产物路径，解析不到就整行省略；status=error 时加一行「错误」显示 error 摘要。指标最多 5 个，超了裁剪。
+数据缺失处理：usage 为 null 时「输入/输出」格省略（指标区只留耗时）；status=error 时结论下方加「错误：{error 摘要}」；错误摘要也一并折叠进明细区（默认区保持三项）。
 
-### B 型：审批小卡片（发现挂起审批时调用）
+### 审批卡片（发现挂起审批时调用）
 
 ```html
 <h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap">DSH approval {approvalId 前 8 字符}</h2>
@@ -207,4 +211,4 @@ deferred 后台回执可能不来（宿主重启等）。用户再次开口问�
 
 - 不碰 DSH 本体，不重复造界面（外接模式的 DSH Web UI 就是观察窗）
 - 不做任务调度队列（一次一个，DSH 自己排）
-- 插件层不做历史落盘、搜索、自建卡片 UI（轻量化）；但Agent行为层用宿主原生 show_card 呈现回执与审批卡片（见「卡片模板库」）
+- 插件层不做历史落盘、搜索、自建卡片 UI（轻量化）；但Agent行为层用宿主原生 show_card 呈现任务结果与审批卡片（见「卡片模板库」）

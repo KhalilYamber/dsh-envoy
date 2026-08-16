@@ -5,7 +5,8 @@
 //       → LabelStore 取号【MMdd-NN】→ 单例 runner（embedded=HeadlessRunner / external=TaskRunner）→ run()
 //       → wait=false（默认异步）：立即返回「已派单」，后台完成后经宿主 deferred 通道唤醒（register/resolve/fail）
 //       → wait=true（同步）：直接等终态返回（外接模式已知边界：同步无审批通知，协议实测 4.5）
-// 台账：globalThis.__dshBridge.ops（进程内 Map，仅内存不落盘，对齐协议实测 7.2 的剥离决策）。
+// 任务记录：globalThis.__dshBridge.ops（进程内 Map；终态增量落盘 <dataDir>/tasks.jsonl，
+//           重启后 loadTaskLog 恢复，对齐协议实测 7.2 的剥离决策）。
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,6 +14,7 @@ import { DshConnection } from '../lib/connection.js';
 import { TaskRunner } from '../lib/task.js';
 import { LabelStore } from '../lib/labels.js';
 import { SessionRoutes } from '../lib/session-routes.js';
+import { appendTaskRow, loadTaskLog, OP_KEEP } from '../lib/task-log.js';
 
 export const name = 'dsh_run';
 
@@ -25,7 +27,7 @@ export const description =
   '无人应答超时自动拒绝（approvalTimeoutMs，0=禁用）。' +
   '注意：外接同步模式（wait=true）无审批通知（已知边界），挂起审批只能靠超时自动拒绝或在 dsh Web UI 处理。' +
   'resume：外接模式传 sessionId 复用已有会话继续（agent 保留上文）；内置模式不支持 resume。' +
-  '进度与台账用 dsh_status 查看；止损用 dsh_cancel。';
+  '进度与任务记录用 dsh_status 查看；止损用 dsh_cancel。';
 
 export const parameters = {
   type: 'object',
@@ -219,7 +221,7 @@ function nextOpId() {
   return `op_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
 }
 
-/** 任务台账（对齐 DSHana 的 ops Map；仅内存，裁剪 50 条） */
+/** 任务记录（对齐 DSHana 的 ops Map；终态落盘见 lib/task-log.js，内存裁剪 OP_KEEP 条） */
 function ledger(s) {
   if (!s.ops) s.ops = new Map();
   return s.ops;
@@ -247,6 +249,7 @@ function doneResult(opId, final, mode) {
 
 async function run(ctx) {
   const s = singleton(ctx);
+  loadTaskLog(s); // 启动恢复任务记录（幂等：index.js onload 已调则跳过；首次派单兜底）
   const cfg = liveConfig(s);
   const sessionPath = ctx?.sessionPath ?? null;
   const bus = ctx?.bus ?? s.bus ?? null;
@@ -338,7 +341,7 @@ async function run(ctx) {
         dataDir: s.dataDir,
         logger: ctx?.log,
         onApproval: null, // 派单前挂载（需当单的 opId/bus/sessionPath 闭包）
-        opLog: ledger(s), // P0-1：审批历史写台账（任务结束后可查）
+        opLog: ledger(s), // P0-1：审批历史写任务记录（任务结束后可查）
         mode,
       });
       s.runner = runner;
@@ -349,7 +352,7 @@ async function run(ctx) {
   const defMs = Number(cfg.defaultTimeoutMs);
   if (Number.isFinite(defMs) && defMs > 0) runner.defaultTimeoutMs = defMs;
 
-  // ---- 4. 台账登记与 opId ----
+  // ---- 4. 任务记录登记与 opId ----
   const opId = nextOpId();
   const ops = ledger(s);
   const entry = {
@@ -367,8 +370,8 @@ async function run(ctx) {
     approvals: [], // P0-1：审批历史（TaskRunner 挂起/解决/自动拒绝时写入，任务结束后保留）
   };
   ops.set(opId, entry);
-  while (ops.size > 50) {
-    // 台账裁剪（对齐实物：仅保留最近 50 条）
+  while (ops.size > OP_KEEP) {
+    // 任务记录裁剪（对齐实物：仅保留最近 OP_KEEP 条）
     const oldest = ops.keys().next().value;
     if (!oldest) break;
     ops.delete(oldest);
@@ -381,7 +384,7 @@ async function run(ctx) {
   // 审批挂起回调：每单挂载（闭包携带当单的 opId/bus/sessionPath）；仅 external（headless 无审批事件）
   if (mode !== 'embedded') {
     runner.onApproval = (pending) => {
-      // opId 反查：TaskRunner 运行台账 ctx.opKey 即派单时传入的 opId（ctx.sessionId 随会话建立写入）
+      // opId 反查：TaskRunner 运行记录 ctx.opKey 即派单时传入的 opId（ctx.sessionId 随会话建立写入）
       let approveOpId = opId;
       if (pending?.sessionId) {
         for (const c of (runner._runs ?? new Map()).values()) {
@@ -437,7 +440,7 @@ async function run(ctx) {
   } else {
     routeAction = 'ignored'; // 内置模式无会话延续
   }
-  entry.routeAction = routeAction; // 台账留痕
+  entry.routeAction = routeAction; // 任务记录留痕
 
   // ---- 6. 执行 ----
   const runOptions = {
@@ -454,7 +457,7 @@ async function run(ctx) {
     onProgress: (p) => {
       const e = ops.get(opId);
       if (!e) return;
-      if (p?.sessionId) e.sessionId = p.sessionId; // P0-1：会话一建立就落台账（对账匹配键）
+      if (p?.sessionId) e.sessionId = p.sessionId; // P0-1：会话一建立就落任务记录（对账匹配键）
       if (p?.output != null) e.output = String(p.output).slice(-8000); // 输出尾部滚动，供 dsh_status
     },
   };
@@ -472,7 +475,7 @@ async function run(ctx) {
     });
   }
 
-  // 终态落地到台账（含路由登记：任务结束拿到真实 sessionId 后登记/刷新路由表）
+  // 终态落地到任务记录（含路由登记：任务结束拿到真实 sessionId 后登记/刷新路由表）
   const settle = async (final) => {
     const e = ops.get(opId);
     if (e) {
@@ -484,6 +487,7 @@ async function run(ctx) {
       e.endedAt = new Date().toISOString();
       if (final?.error) e.error = String(final.error).slice(0, 2000);
       delete e.output; // 终态后完整输出见结构化结果 / details
+      appendTaskRow(s, e); // 任务记录落盘：终态快照增量追加（写失败静默；每 op 只落一次）
     }
     // 路由登记：拿到真实 sessionId 且该 cwd 参与路由（auto 新建 / new / 复用均刷新时间戳）
     if (routeCwd && final?.sessionId && mode !== 'embedded') {
@@ -509,6 +513,7 @@ async function run(ctx) {
           ent.status = 'error';
           ent.error = msg.slice(0, 2000);
           ent.endedAt = new Date().toISOString();
+          appendTaskRow(s, ent); // 兜底路径同样落盘终态（正常路径 settle 已落，二者互斥）
         }
         await registerPromise;
         await failDeferred({ bus, taskId: opId, error: { message: msg.slice(0, 300) } });
@@ -530,7 +535,7 @@ async function run(ctx) {
           text:
             `已派单【${tag ?? '??'}】任务（opId: ${opId}${sidParam ? `，resume 会话 ${sidParam}` : ''}）。${modeLine}` +
             `${routeActionText(routeAction, resumeSid)}` +
-            `完成后宿主经后台消息带回结果；进度与台账可随时用 dsh_status 查看，止损用 dsh_cancel。${followup}`,
+            `完成后宿主经后台消息带回结果；进度与任务记录可随时用 dsh_status 查看，止损用 dsh_cancel。${followup}`,
         },
       ],
       details: {

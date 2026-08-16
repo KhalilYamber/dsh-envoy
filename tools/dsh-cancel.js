@@ -4,7 +4,7 @@
 //       多个在跑时须传 sessionId/opId 指定）→ runner.cancelRequested（abort 联动：
 //       外接任务状态机收到中断后补发 session.cancel，终态 aborted，协议实测 5.3；
 //       内置 headless 直接 taskkill 进程树）
-//       → 台账标记 cancelling（终态落地时被 aborted/error 覆盖）→ 返回取消结果。
+//       → 任务记录标记 cancelling（终态落地时被 aborted/error 覆盖）→ 返回取消结果。
 //       → 会话路由摘除（取消即废弃：该会话不再作为同工程的延续目标）。
 // 幂等：无运行任务 / 目标不存在均返回「无需取消」，不报错。
 
@@ -23,7 +23,7 @@ export const parameters = {
     sessionId: {
       type: 'string',
       description:
-        '要取消任务的 id：外接模式用会话 id；内置 headless 模式用 opId（dsh_run 返回 / dsh_status 台账里带）。' +
+        '要取消任务的 id：外接模式用会话 id；内置 headless 模式用 opId（dsh_run 返回 / dsh_status 任务记录里带）。' +
         '缺省取消唯一运行中的任务；有多个任务在跑时必须传',
     },
   },
@@ -32,7 +32,7 @@ export const parameters = {
 
 export const sessionPermission = { kind: 'external_side_effect' };
 
-/** 按入口键定位运行任务：先按 opKey（台账键），再按 sessionId（对齐 TaskRunner.cancelRequested 的查找语义） */
+/** 按入口键定位运行任务：先按 opKey（任务记录键），再按 sessionId（对齐 TaskRunner.cancelRequested 的查找语义） */
 function findTarget(runner, sid) {
   const runs = runner._runs ?? new Map();
   if (sid) {
@@ -113,12 +113,12 @@ async function cancel(ctx) {
     }
   }
 
-  // 台账标记 cancelling（对齐实物 cancelledRequested 语义；终态落地时被 aborted/error 覆盖）
+  // 任务记录标记 cancelling（对齐实物 cancelledRequested 语义；终态落地时被 aborted/error 覆盖）
   try {
     const entry = s.ops?.get(target.opKey);
     if (entry && entry.status === 'running') entry.status = 'cancelling';
   } catch {
-    // 台账更新失败静默（不影响取消本身）
+    // 任务记录更新失败静默（不影响取消本身）
   }
 
   const sessionIdOut = target.sessionId ?? sid;

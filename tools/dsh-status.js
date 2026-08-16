@@ -1,8 +1,8 @@
 // dsh-status.js —— 查进度工具（dsh_status，只读）
 // 协议细节以 DSH 官方实现与实测行为为准（DSH 0.1.0-rc.6）。
 // 返回：连接模式与健康（external 探测 / embedded headless 任务进程状态）、运行中任务、
-//       近期任务台账（globalThis.__dshBridge.ops，含审批历史）、挂起审批列表（用 dsh_approve 应答；内置模式恒无）、
-//       DSH 侧对账（P0-1：external 健康时列活动会话，找出「不在本地台账」的会话，只呈现事实不自动接管）。
+//       近期任务记录（globalThis.__dshBridge.ops，含审批历史；重启后从 tasks.jsonl 恢复）、挂起审批列表（用 dsh_approve 应答；内置模式恒无）、
+//       DSH 侧对账（P0-1：external 健康时列活动会话，找出「不在本地任务记录」的会话，只呈现事实不自动接管）。
 // 外接模式传 sessionId 时尝试从 DSH 查该会话状态（client.listSessions）。
 // 只读原则：不建立连接、不拉起任何服务；连接与 runner 不可用时给提示。
 
@@ -10,14 +10,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DshClient } from '../lib/client.js';
 import { SessionRoutes } from '../lib/session-routes.js';
+import { loadTaskLog } from '../lib/task-log.js';
 
 export const name = 'dsh_status';
 
 export const description =
-  '查 dsh 连接状态与任务台账（只读，无副作用）：连接模式与健康（外接服务探测 / 内置 headless 任务进程状态）、运行中任务、' +
-  '近期任务台账（最近 50 条，含每条任务的审批历史）、挂起审批列表（approvalId/toolName/args 摘要/理由，用 dsh_approve 应答；内置 headless 模式恒无审批）、' +
-  'DSH 侧对账（外接健康时自动列出「DSH 侧活动会话但不在本地台账」的情况，宿主重启后对账用）。' +
-  '外接模式传 sessionId 可查询该 dsh 会话是否在当前账本。';
+  '查 dsh 连接状态与任务记录（只读，无副作用）：连接模式与健康（外接服务探测 / 内置 headless 任务进程状态）、运行中任务、' +
+  '近期任务记录（最近 50 条，含每条任务的审批历史）、挂起审批列表（approvalId/toolName/args 摘要/理由，用 dsh_approve 应答；内置 headless 模式恒无审批）、' +
+  'DSH 侧对账（外接健康时自动列出「DSH 侧活动会话但不在本地任务记录」的情况，宿主重启后对账用）。' +
+  '外接模式传 sessionId 可查询该 dsh 会话是否在当前任务记录。';
 
 export const parameters = {
   type: 'object',
@@ -25,7 +26,7 @@ export const parameters = {
     sessionId: {
       type: 'string',
       description:
-        '可选（仅外接模式有意义）：查询指定 dsh 会话是否在当前账本（存在/不存在，尽力返回 cwd 等摘要）。内置 headless 模式无会话句柄',
+        '可选（仅外接模式有意义）：查询指定 dsh 会话是否在当前任务记录（存在/不存在，尽力返回 cwd 等摘要）。内置 headless 模式无会话句柄',
     },
   },
   required: [],
@@ -106,6 +107,7 @@ function pickSessionFields(raw) {
 
 async function status(ctx) {
   const s = singleton(ctx);
+  loadTaskLog(s); // 启动恢复任务记录（幂等：插件启动/首次派单已调则跳过；重启后首次查询兜底）
   const cfg = liveConfig(s);
   const mode = cfg.mode || 'auto';
   const sessionId = ctx?.sessionId != null ? String(ctx.sessionId).trim() : '';
@@ -143,7 +145,7 @@ async function status(ctx) {
     };
   }
 
-  // ---- 2. 运行中任务（TaskRunner 运行台账，dsh_cancel 入口键即 opId/sessionId） ----
+  // ---- 2. 运行中任务（TaskRunner 运行记录，dsh_cancel 入口键即 opId/sessionId） ----
   const running = [];
   if (runner) {
     for (const c of (runner._runs ?? new Map()).values()) {
@@ -155,7 +157,7 @@ async function status(ctx) {
     }
   }
 
-  // ---- 3. 近期任务台账（dsh_run 维护的 ops Map，最新在前，最多 50 条） ----
+  // ---- 3. 近期任务记录（dsh_run 维护的 ops Map，最新在前，最多 50 条） ----
   const ops = s.ops ? [...s.ops.values()].slice().reverse() : [];
 
   // ---- 4. 挂起审批列表（对齐协议实测 4.5 字段） ----
@@ -182,7 +184,7 @@ async function status(ctx) {
     };
   });
 
-  // ---- 4.5 DSH 侧对账（P0-1）：external 健康时列活动会话，找「不在本地台账」的会话 ----
+  // ---- 4.5 DSH 侧对账（P0-1）：external 健康时列活动会话，找「不在本地任务记录」的会话 ----
   // 只呈现事实（sessionId / 更新时间 / 状态），不猜测归属、不自动接管；DSH 无「列挂起审批」接口（实测）
   let reconcile = null;
   if (external?.healthy) {
@@ -267,7 +269,7 @@ async function status(ctx) {
   if (sessionId) {
     if (effectiveMode === 'embedded') {
       sessionNote =
-        '内置 headless 模式无会话句柄（每次任务独立会话），无法按 sessionId 查询；用 opId 看台账即可';
+        '内置 headless 模式无会话句柄（每次任务独立会话），无法按 sessionId 查询；用 opId 看任务记录即可';
     } else {
       let client = null;
       try {
@@ -289,7 +291,7 @@ async function status(ctx) {
             session = { found: true, ...pickSessionFields(hit) };
           } else {
             session = { found: false, sessionId };
-            sessionNote = `会话 ${sessionId} 不存在于当前 DSH 账本（可能已归档或属于另一个 DSH 服务）`;
+            sessionNote = `会话 ${sessionId} 不存在于当前 DSH 会话列表（可能已归档或属于另一个 DSH 服务）`;
           }
         } catch (e) {
           sessionNote = `查询会话失败：${e?.message || e}`;
@@ -352,7 +354,7 @@ async function status(ctx) {
   }
   if (reconcile?.unknown?.length) {
     lines.push(
-      `⚠️ DSH 侧有 ${reconcile.unknown.length} 个活动会话不在本地台账（可能宿主重启过）：` +
+      `⚠️ DSH 侧有 ${reconcile.unknown.length} 个活动会话不在本地任务记录（可能宿主重启过）：` +
         reconcile.unknown
           .map((u) => `${u.sessionId}（${u.updatedAgo ?? '更新时间未知'}，状态 ${u.state}）`)
           .join('；')
@@ -360,17 +362,17 @@ async function status(ctx) {
     lines.push('如需接管请向用户说明并派新任务或 resume');
   }
   if (ops.length) {
-    lines.push(`近期台账（${ops.length} 条，最新在前）：`);
+    lines.push(`近期任务（${ops.length} 条，最新在前）：`);
     for (const o of ops.slice(0, 20)) {
       lines.push(
-        `· ${o.opId} ${o.status} ${o.tag ?? ''} ` +
+        `· ${o.opId} ${o.status}${o.status === 'interrupted' ? '（上次中断）' : ''} ${o.tag ?? ''} ` +
           `${o.durationMs != null ? `${(o.durationMs / 1000).toFixed(1)}s` : '-'} ` +
           `${String(o.task ?? '').slice(0, 40)}` +
           `${o.approvals?.length ? `（审批 ${o.approvals.length} 条）` : ''}`
       );
     }
   } else {
-    lines.push('近期台账：空');
+    lines.push('近期任务：空');
   }
   if (sessionId) {
     if (session?.found) {
@@ -416,6 +418,7 @@ async function status(ctx) {
           endedAt: o.endedAt ?? null,
           durationMs: o.durationMs ?? null,
           stopReason: o.stopReason ?? null,
+          interruptedAt: o.interruptedAt ?? null, // 上次中断标记（重启恢复时写入）
           usage: o.usage ?? null,
           mode: o.mode ?? null,
           wait: o.wait ?? null,

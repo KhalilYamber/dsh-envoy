@@ -1,7 +1,9 @@
 // index.js —— DSH Bridge 插件入口
-// 职责：初始化进程内单例、注册卸载清理。
+// 职责：初始化进程内单例、启动恢复任务记录、注册卸载清理。
 // 连接抽象不在这里启动（懒加载）：工具首次调用时构造 DshConnection 并 ensure()。
 // 这样 external 模式零开销（探测一次即可），embedded 模式首次调用时拉起 web host。
+
+import { loadTaskLog } from './lib/task-log.js';
 
 export default class DshBridgePlugin {
   async onload() {
@@ -17,6 +19,7 @@ export default class DshBridgePlugin {
     }
     g.__dshBridge.dataDir = dataDir;
     g.__dshBridge.cfgSnapshot = config;
+    loadTaskLog(g.__dshBridge); // 启动恢复任务记录（幂等；工具首次调用还会兜底，见 dsh-run/dsh-status）
 
     // 卸载/重载/禁用时回收（仅 embedded 有子进程要收）
     this.register(() => {

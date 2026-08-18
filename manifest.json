@@ -3,7 +3,7 @@
   "id": "dsh-bridge",
   "name": "DSH Envoy",
   "version": "0.2.5",
-  "description": "DSH Envoy：Hana 与 DeepSeek Harness（DSH）的交接层。一个连接抽象，两种实现：内置（headless 一次性进程，任务记录隔离）或外接（直连您自跑的 DSH，任务记录归您）。四个工具：dsh_run 派活、dsh_status 查进度、dsh_approve 应答审批、dsh_cancel 止损。工作标签【MMdd-NN】分组，会话可续跑（同工程自动延续）。审批：外接模式同步到 Hana 内联问询（180s 无人应答自动拒绝），内置模式越界即拒（可带授权重派）。任务记录落盘（tasks.jsonl），重启后可查历史。",
+  "description": "DSH Envoy：Hana 与 DeepSeek Harness（DSH）的交接层。一个连接抽象，两种实现：内置（headless 一次性进程，任务记录隔离）或外接（直连您自跑的 DSH，任务记录归您）。五个工具：dsh_run 派活、dsh_status 查进度、dsh_approve 应答审批、dsh_cancel 止损、dsh_diagnose 体检。工作标签【MMdd-NN】分组，会话可续跑（同工程自动延续）。审批：外接模式同步到 Hana 内联问询（180s 无人应答自动拒绝），内置模式越界即拒（可带授权重派）。任务记录落盘（tasks.jsonl），重启后可查历史。",
   "author": "Khalil",
   "minAppVersion": "0.82.0",
   "trust": "full-access",

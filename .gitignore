@@ -11,6 +11,8 @@ dist/*.sha256
 # 本机备份与内部资料
 backup/
 research/
+release-repo/
+HANDOFF.md
 install-*
 SPEC-*.md
 FIXLIST-*.md

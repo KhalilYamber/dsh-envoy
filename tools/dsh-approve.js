@@ -97,6 +97,8 @@ export async function execute(input, ctx) {
   const params = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
   const sessionCtx = ctx && typeof ctx === 'object' && !Array.isArray(ctx) ? ctx : {};
   const merged = { ...sessionCtx, ...params };
+  delete merged.sessionId; // 宿主注入的当前会话 id 不参与审批应答（对齐 dsh_run/status/cancel 的防污染约定）
+  if (params.sessionId != null && params.sessionId !== '') merged.sessionId = params.sessionId;
   try {
     return await approve(merged);
   } catch (e) {

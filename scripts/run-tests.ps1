@@ -11,6 +11,7 @@ cwd = 项目根）。单个测试失败不中断，继续跑后面的测试，�
     # -SkipDsh：跳过需要本机 DSH（127.0.0.1:3080）的测试
 
 测试清单（依赖顺序）：
+  0. scripts/lex-scan.mjs     词法扫描（注释配对/未闭合，防吞函数，无需 DSH）
   1. research/test-labels.mjs          标签计数器（无需 DSH）
   2. research/smoke-routes.mjs         路由表（无需 DSH）
   3. research/test-task-log.mjs        任务记录落盘（需本机 DSH 在跑）
@@ -35,6 +36,7 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 
 # 测试清单：名称 / 相对路径 / 是否需要本机 DSH
 $Tests = @(
+    @{ Name = 'lex-scan（词法扫描，防吞函数）';      File = 'scripts\lex-scan.mjs';            NeedsDsh = $false },
     @{ Name = 'test-labels（标签计数器）';         File = 'research\test-labels.mjs';         NeedsDsh = $false },
     @{ Name = 'smoke-routes（路由表）';            File = 'research\smoke-routes.mjs';        NeedsDsh = $false },
     @{ Name = 'test-task-log（任务记录落盘）';     File = 'research\test-task-log.mjs';       NeedsDsh = $true },

@@ -44,7 +44,7 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 计算版本号与 tag 名
         id: meta
@@ -96,7 +96,7 @@ jobs:
       VERSION: ${{ needs.create-release.outputs.version }}
       TAG: ${{ needs.create-release.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 打包（跑仓库自带的 pack.ps1，内含 verify-zip 自检）
         shell: pwsh
@@ -146,7 +146,7 @@ jobs:
       VERSION: ${{ needs.create-release.outputs.version }}
       TAG: ${{ needs.create-release.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 下载并校验资产（含失败清理）
         run: |

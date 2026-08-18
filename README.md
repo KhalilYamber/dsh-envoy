@@ -1,8 +1,19 @@
 # DSH Envoy（dsh-bridge）
 
-> 给 Hana 接一个「外包 coding 的开关」。说一句「派给 DSH」，任务就流向本机 DeepSeek Harness 执行：审批同步回 Hana 里决策，结果自动带回，全程不必切换界面。
+> 一个 Hana（HanaAgent）插件：说一句「派给 DSH」，任务就流向本机 DeepSeek Harness 执行：审批同步回 Hana 里决策，结果自动带回，全程不必切换界面。
 
-> 什么是 DSH？DSH（DeepSeek Harness）是 DeepSeek 官方的编码 Agent 框架（类似 Codex CLI），在本机沙箱里执行写代码、跑命令等长任务。本插件负责在 Hana 和 DSH 之间搭桥。
+## 谁是 host？Hana，不是 DSH
+
+**本插件的宿主是 Hana**（HanaAgent 桌面应用，原名 OpenHanako）：它安装进 Hana、运行在 Hana 进程内、由 Hana 的 Agent 调用。DSH 是它对接的**下游执行方**，关系如下：
+
+```
+Hana（宿主：装插件 · 发指令 · 收结果）
+ └─ dsh-bridge（本插件，桥）
+     └─ DSH（DeepSeek Harness，本机沙箱执行）
+```
+
+- **Hana**（HanaAgent / 原 OpenHanako）：AI 助手桌面应用，本插件的运行环境与交互界面。对 Hana 说话，就是对插件下指令
+- **DSH**（DeepSeek Harness）：DeepSeek 官方的编码 Agent 框架（类似 Codex CLI），在本机沙箱里执行写代码、跑命令等长任务
 
 ## 这是什么
 

@@ -39,7 +39,7 @@ Hana ：正在派单【0815-01】…（external 模式）
 
 ## 安装（手动解压，已验证）
 
-1. 从 [Releases 页面](https://github.com/KhalilYamber/dsh-envoy/releases) 下载最新版 `dsh-bridge-0.2.5.zip`（或直接用仓库 `dist/` 目录里的同名文件）
+1. 从 [Releases 页面](https://github.com/KhalilYamber/dsh-envoy/releases) 下载最新版 zip（如 `dsh-bridge-0.2.5.zip`，具体版本号以 Releases 页面为准；或直接用仓库 `dist/` 目录里的同名文件）
 2. 解压到 Hana 的插件目录，目录名必须是 `dsh-bridge`：
    - Windows：`C:\Users\<您的用户名>\.hanako\plugins\dsh-bridge`
    - macOS / Linux：`~/.hanako/plugins/dsh-bridge`
@@ -92,6 +92,8 @@ lib/                     连接抽象、DSH 客户端、headless 运行器、任
 tools/                   五个工具：dsh_run / dsh_status / dsh_approve / dsh_cancel / dsh_diagnose
 skills/dsh-bridge/       配套技能（Hana 的操作手册，自动加载）
 scripts/verify-zip.mjs   zip 真实性校验（PK 魔数 + EOCD + sha256，pack 与 CI 共用）
+scripts/lex-scan.mjs     词法扫描（注释配对/未闭合检查，防「注释吞函数」，发布前必跑）
+scripts/run-tests.ps1    回归测试一键入口（-SkipDsh 可跳过需本机 DSH 的用例）
 .github/workflows/       发版流水线（create-release → build → verify）
 dist/                    可安装的插件包
 pack.ps1                 开发者打包脚本（生成 dist，打包后自动 verify-zip）

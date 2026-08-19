@@ -39,13 +39,40 @@ Hana ：正在派单【0815-01】…（external 模式）
 
 ## 安装（手动解压，已验证）
 
-1. 从 [Releases 页面](https://github.com/KhalilYamber/dsh-envoy/releases) 下载最新版 zip（如 `dsh-bridge-0.10.0.zip`，具体版本号以 Releases 页面为准；或直接用仓库 `dist/` 目录里的同名文件）
+1. 从 [Releases 页面](https://github.com/KhalilYamber/dsh-envoy/releases) 下载最新版 zip（如 `dsh-bridge-1.1.0.zip`，具体版本号以 Releases 页面为准；或直接用仓库 `dist/` 目录里的同名文件）
 2. 解压到 Hana 的插件目录，目录名必须是 `dsh-bridge`：
    - Windows：`C:\Users\<您的用户名>\.hanako\plugins\dsh-bridge`
    - macOS / Linux：`~/.hanako/plugins/dsh-bridge`
 3. 重启 Hana
 
 > 若您的 Hana 版本有插件管理界面，也可尝试从界面导入（各版本能力不同，以手动解压为准）。
+
+## 更新（从旧版升级，v0.2.x / v1.0.x → v1.1.0）
+
+v1.1.0 是薄桥 2.0 重构版：内置模式从旧「自拉 headless 进程」换成「官方 SDK runtime」。任务记录、会话路由、标签等数据格式未变，升级后自动延续；内置模式的官方 npm 安装是唯一的新步骤。以下步骤可交给 Agent 执行（路径中的 `<用户名>`、`<数据目录>` 按实际替换）：
+
+1. **备份插件数据目录**（保险，可选）：任务记录与会话路由升级后会自动读取，备份仅作兜底。
+   ```powershell
+   Copy-Item "C:\Users\<用户名>\.hanako\plugin-data\dsh-bridge" "$env:TEMP\dsh-bridge-backup" -Recurse
+   ```
+2. **关闭 Hana**。
+3. **删除旧插件目录**（避免旧文件残留，如已废弃的 `lib/headless.js`）：
+   ```powershell
+   Remove-Item "C:\Users\<用户名>\.hanako\plugins\dsh-bridge" -Recurse -Force
+   ```
+4. **解压新 zip 到插件目录**（目录名必须是 `dsh-bridge`）。
+5. **清理旧内置模式残留**（可选）：旧 `dsh-node_modules` junction 与 `dsh-home/` 隔离目录已不再使用，删掉释放空间；不删也不影响运行。
+   ```powershell
+   Remove-Item "C:\Users\<用户名>\.hanako\plugin-data\dsh-bridge\dsh-node_modules" -Recurse -Force -ErrorAction SilentlyContinue
+   Remove-Item "C:\Users\<用户名>\.hanako\plugin-data\dsh-bridge\dsh-home" -Recurse -Force -ErrorAction SilentlyContinue
+   ```
+6. **启动 Hana**。
+7. **内置模式用户：执行官方安装命令**（bundled 模板会自动从插件目录落位到数据目录；只装这一次）：
+   ```powershell
+   npm install --prefix "C:\Users\<用户名>\.hanako\plugin-data\dsh-bridge\bundled"
+   ```
+   外接模式用户（自跑 DSH 在 127.0.0.1:3080）跳过本步，零额外配置。
+8. **验证**：对 Hana 说「派给 DSH：报告你的身份」，或调 `dsh_diagnose` 体检。旧配置 `mode=embedded` 会自动按 bundled 语义兼容；历史任务记录与工程会话路由自动恢复。
 
 ## 平台支持
 

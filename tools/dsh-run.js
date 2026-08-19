@@ -267,7 +267,9 @@ async function run(ctx) {
   const task = String(ctx?.task ?? '').trim();
   if (!task) throw new Error('task 不能为空：请给出要 dsh 执行的任务书文本');
   const sidParam = String(ctx?.sessionId ?? '').trim() || null;
-  const cwd = String(ctx?.cwd ?? '').trim() || String(cfg.defaultCwd ?? '').trim() || '';
+  // 【作者后续开发】defaultCwd 功能未开发完成，暂禁用：不读取配置值，cwd 只认显式传参；
+  // 未显式传 cwd 时任务落在 DSH 默认工作区（外接模式为「未分组」）。
+  const cwd = String(ctx?.cwd ?? '').trim() || '';
   const policyRaw = String(ctx?.sessionPolicy ?? '').trim();
   const policy = policyRaw ? policyRaw : 'auto';
   if (!['auto', 'new'].includes(policy)) {

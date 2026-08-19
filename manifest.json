@@ -44,8 +44,8 @@
         "defaultCwd": {
           "type": "string",
           "default": "",
-          "title": "默认工作目录",
-          "description": "DSH agent 的沙箱工作目录（读写文件的活动范围）。建议填您的项目目录，例如 D:\\Projects。可以留空：留空时任务落在 DSH 的默认工作区（外接模式为「协助Hana」工作区）。工具调用显式传 cwd 时优先。改后立即生效，无需重启。"
+          "title": "默认工作目录（功能未开发）",
+          "description": "⚠️ 作者后续开发，功能未完成：本设置已禁用，填写不生效。会话默认落在 DSH 的「未分组」工作区。待会话路由改造（同 cwd 多工程会话）完成后启用。"
         },
         "defaultTimeoutMs": {
           "type": "number",

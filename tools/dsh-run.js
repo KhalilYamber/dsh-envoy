@@ -69,7 +69,7 @@ export const parameters = {
       type: 'string',
       description:
         'Agent 预设 id（仅外接模式生效）：新建会话时经 session.create 透传给 DSH（预设传递不复制，插件不存任何预设定义）。' +
-        '缺省用插件配置 agentPreset；resume（传 sessionId）时该值被忽略（延续已有会话的预设）。' +
+        '不传时插件不动 DSH 的默认预设（尊重用户已有 DSH）。resume（传 sessionId）时该值被忽略（延续已有会话的预设）。' +
         '内置 bundled 模式无预设通道（官方 SDK 协议无此参数），该参数被忽略。',
     },
     permission: {
@@ -281,9 +281,8 @@ async function run(ctx) {
   if (permission && !['workspace-write', 'danger-full-access', 'read-only'].includes(permission)) {
     throw new Error('permission 只支持 workspace-write / danger-full-access / read-only');
   }
-  // agentPreset：显式传参优先，否则插件配置 agentPreset（仅 external 生效；bundled 忽略）
-  const agentPreset =
-    String(ctx?.agentPreset ?? '').trim() || String(cfg.agentPreset ?? '').trim() || null;
+  // agentPreset：仅显式传参透传（不擅自替用户选预设，尊重用户 DSH 的默认预设）；bundled 忽略
+  const agentPreset = String(ctx?.agentPreset ?? '').trim() || null;
 
   // ---- 1. 连接：懒建单例 DshConnection 并 ensure() ----
   let conn = s.connection;

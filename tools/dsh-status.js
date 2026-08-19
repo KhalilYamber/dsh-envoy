@@ -111,14 +111,16 @@ async function status(ctx) {
   loadTaskLog(s); // 启动恢复任务记录（幂等：插件启动/首次派单已调则跳过；重启后首次查询兜底）
   const cfg = liveConfig(s);
   const mode = cfg.mode || 'auto';
+  const modeShown = mode === 'embedded' ? 'bundled' : mode; // 历史配置值显示归一
   const sessionId = ctx?.sessionId != null ? String(ctx.sessionId).trim() : '';
   const runner = s.runner ?? null;
   const conn = s.connection ?? null;
 
   // ---- 1. 连接模式与健康 ----
   const effectiveMode = conn?.effectiveMode ?? null;
+  const effectiveShown = effectiveMode === 'embedded' ? 'bundled' : effectiveMode;
   let external = null;
-  if (mode !== 'embedded') {
+  if (mode === 'external' || mode === 'auto') {
     // external 探测：轻量 GET /（3s 超时），只读，不起任何服务
     const port = Number(cfg.externalPort || cfg.webPort || manifestDefault('webPort'));
     const healthy = await new DshClient(`http://127.0.0.1:${port}`)
@@ -127,11 +129,11 @@ async function status(ctx) {
       .catch(() => false);
     external = { port, healthy };
   }
-  let embedded = null;
+  let bundled = null;
   const sdkLeg = conn?.sdkLeg ?? null; // DshConnection 内部句柄，只读列任务进程状态
   if (sdkLeg) {
     const procs = [...(sdkLeg._runs ?? new Map()).values()];
-    embedded = {
+    bundled = {
       ready: Boolean(sdkLeg._resolved),
       processes: procs.map((e) => ({
         opId: e.opKey ?? null,
@@ -304,17 +306,17 @@ async function status(ctx) {
   // ---- 6. 组装文本（content 人话摘要 + details.dsh 结构化数据） ----
   const lines = [];
   lines.push(
-    `连接模式：${mode}${effectiveMode ? `（当前生效：${effectiveMode}）` : '（连接尚未建立）'}`
+    `连接模式：${modeShown}${effectiveShown ? `（当前生效：${effectiveShown}）` : '（连接尚未建立）'}`
   );
   if (external) {
     lines.push(`外部 DSH：http://127.0.0.1:${external.port} ${external.healthy ? '✅ 健康' : '❌ 不可达'}`);
   }
-  if (embedded) {
+  if (bundled) {
     lines.push(
-      `内置 bundled：${embedded.running > 0 ? `${embedded.running} 个任务进程运行中` : '无运行中的任务进程'}` +
-        `（官方 SDK runtime、无审批通道，越界操作自动拒绝${embedded.ready ? '' : '，依赖尚未就绪'}）`
+      `内置 bundled：${bundled.running > 0 ? `${bundled.running} 个任务进程运行中` : '无运行中的任务进程'}` +
+        `（官方 SDK runtime、无审批通道，越界操作自动拒绝${bundled.ready ? '' : '，依赖尚未就绪'}）`
     );
-    for (const p of embedded.processes.slice(-5)) {
+    for (const p of bundled.processes.slice(-5)) {
       lines.push(
         `· ${p.opId ?? '?'} ${p.status}${p.tag ? ` ${p.tag}` : ''}` +
           `${p.exitCode != null ? ` exit=${p.exitCode}` : ''}` +
@@ -408,7 +410,7 @@ async function status(ctx) {
         mode,
         effectiveMode,
         external,
-        embedded,
+        bundled,
         running,
         ledger: ops.map((o) => ({
           opId: o.opId,

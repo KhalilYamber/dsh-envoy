@@ -73,10 +73,9 @@
         },
         "agentPreset": {
           "type": "string",
-          "enum": ["standard", "code", "cordis", "minimal"],
-          "default": "standard",
+          "default": "",
           "title": "Agent 预设",
-          "description": "仅外接模式生效（session.create 传 agentPreset）；内置 bundled 模式无预设通道（官方 SDK 协议无此参数），此字段保留。"
+          "description": "仅外接模式生效：dsh_run 显式传 agentPreset 时经 session.create 透传（插件不存任何预设定义）；留空不传，尊重您 DSH 的默认预设。内置 bundled 模式无预设通道（官方 SDK 协议无此参数）。"
         },
         "reasoningEffort": {
           "type": "string",

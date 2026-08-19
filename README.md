@@ -52,7 +52,7 @@ Hana ：正在派单【0815-01】…（external 模式）
 
 ## 安装（手动解压，已验证）
 
-1. 从 [Releases 页面](https://github.com/KhalilYamber/dsh-envoy/releases) 下载最新版 zip（如 `dsh-bridge-0.2.5.zip`，具体版本号以 Releases 页面为准；或直接用仓库 `dist/` 目录里的同名文件）
+1. 从 [Releases 页面](https://github.com/KhalilYamber/dsh-envoy/releases) 下载最新版 zip（如 `dsh-bridge-0.10.0.zip`，具体版本号以 Releases 页面为准；或直接用仓库 `dist/` 目录里的同名文件）
 2. 解压到 Hana 的插件目录，目录名必须是 `dsh-bridge`：
    - Windows：`C:\Users\<您的用户名>\.hanako\plugins\dsh-bridge`
    - macOS / Linux：`~/.hanako/plugins/dsh-bridge`
@@ -71,7 +71,7 @@ Hana ：正在派单【0815-01】…（external 模式）
 |---|---|
 | `mode` | 默认 `auto`（探测到 3080 有 DSH 就走外接，否则内置）。想固定走某一种再改 |
 | `apiKey` | **仅内置模式需要**（外接模式凭证由 DSH 自己管理，不填）。填 DeepSeek API Key，只经环境变量传给任务进程，不落盘 |
-| `defaultCwd` | 可留空。留空时外接模式任务落进 DSH 的「协助Hana」工作区 |
+| `defaultCwd` | 可留空。填写后作为 dsh_run 未显式传 cwd 时的默认工作目录；留空时任务落进 DSH 默认工作区（外接模式为「协助Hana」工作区） |
 | `agentPreset` | 仅外接模式生效：dsh_run 显式传 agentPreset 时透传 session.create（插件不存任何预设定义）；留空不传，尊重您 DSH 的默认预设 |
 | `nodePath` | 可留空。内置模式启动官方 SDK runtime 的 node.exe（留空自动探测） |
 

@@ -151,7 +151,7 @@ LICENSE                  MIT
 
 ## 致谢
 
-本项目开发中借鉴了 [Nyasers/dsh-hanako](https://github.com/Nyasers/dsh-hanako)（DSHana，MIT License）的设计思路：宿主 deferred 通道的调用方式、审批应答的信封结构、任务记录与标签的组织模式。代码为独立重写，传输层为官方 SDK（外接 HTTP 信封 / 内置官方 SDK runtime），谨此致谢原作者的优秀工作。
+本项目开发中借鉴了 Nyasers/dsh-hanako（DSHana）的设计思路：宿主 deferred 通道的调用方式、审批应答的信封结构、任务记录与标签的组织模式。实现为独立重写，未复制或修改其源码文件；传输层采用 DeepSeek Harness 官方 SDK 路线（外接 HTTP 信封 / 内置官方 SDK runtime）。谨此致谢原作者的优秀工作。
 
 ## License
 

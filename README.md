@@ -58,7 +58,7 @@ Hana ：正在派单【0815-01】…（external 模式）
 |---|---|
 | `mode` | 默认 `auto`（探测到 3080 有 DSH 就走外接，否则内置）。想固定走某一种再改 |
 | `apiKey` | **仅内置模式需要**（外接模式凭证由 DSH 自己管理，不填）。填 DeepSeek API Key，只经环境变量传给任务进程，不落盘 |
-| `defaultCwd` | 可留空。填写后作为 dsh_run 未显式传 cwd 时的默认工作目录；留空时任务落进 DSH 默认工作区（外接模式为「协助Hana」工作区） |
+| `defaultCwd` | 可留空（功能未开发，暂禁用，填写不生效）。留空时任务落进 DSH 默认工作区（外接模式为「协助Hana」工作区） |
 | `agentPreset` | 仅外接模式生效：dsh_run 显式传 agentPreset 时透传 session.create（插件不存任何预设定义）；留空不传，尊重您 DSH 的默认预设 |
 | `nodePath` | 可留空。内置模式启动官方 SDK runtime 的 node.exe（留空自动探测） |
 

@@ -403,6 +403,42 @@ async function status(ctx) {
     lines.push('会话路由表：空（同工程任务将新建会话并自动登记）');
   }
 
+  // ---- 5.5 ledger 组装（含缓存增量：同会话上一条终态 cache 差值，查不到为 null）----
+  const ledgerTasks = [];
+  {
+    const sessionPrevCache = new Map(); // sessionId → 更旧记录的 cache
+    const ordered = [...ops].reverse(); // 旧 → 新，便于顺序求「上一条」
+    for (const o of ordered) {
+      const u = o.usage ?? null;
+      const cache = u && typeof u.cache === 'number' ? u.cache : null;
+      let cacheDelta = null;
+      if (cache !== null && o.sessionId) {
+        const prev = sessionPrevCache.get(o.sessionId);
+        cacheDelta = prev !== undefined ? cache - prev : null; // 首单/窗口外查不到 → null
+        sessionPrevCache.set(o.sessionId, cache);
+      }
+      ledgerTasks.push({
+        opId: o.opId,
+        tag: o.tag ?? null,
+        status: o.status,
+        sessionId: o.sessionId ?? null,
+        startedAt: o.startedAt ?? null,
+        endedAt: o.endedAt ?? null,
+        durationMs: o.durationMs ?? null,
+        stopReason: o.stopReason ?? null,
+        interruptedAt: o.interruptedAt ?? null, // 上次中断标记（重启恢复时写入）
+        usage: u,
+        cacheDelta, // 同会话上一条终态 cache 差值；首单/窗口外为 null
+        mode: o.mode ?? null,
+        wait: o.wait ?? null,
+        task: String(o.task ?? '').slice(0, 80),
+        error: o.error ?? null,
+        approvals: Array.isArray(o.approvals) ? o.approvals : [], // P0-1：审批历史（含 rejected(auto)）
+      });
+    }
+    ledgerTasks.reverse(); // 恢复最新在前
+  }
+
   return {
     content: [{ type: 'text', text: lines.join('\n') }],
     details: {
@@ -412,23 +448,7 @@ async function status(ctx) {
         external,
         bundled,
         running,
-        ledger: ops.map((o) => ({
-          opId: o.opId,
-          tag: o.tag ?? null,
-          status: o.status,
-          sessionId: o.sessionId ?? null,
-          startedAt: o.startedAt ?? null,
-          endedAt: o.endedAt ?? null,
-          durationMs: o.durationMs ?? null,
-          stopReason: o.stopReason ?? null,
-          interruptedAt: o.interruptedAt ?? null, // 上次中断标记（重启恢复时写入）
-          usage: o.usage ?? null,
-          mode: o.mode ?? null,
-          wait: o.wait ?? null,
-          task: String(o.task ?? '').slice(0, 80),
-          error: o.error ?? null,
-          approvals: Array.isArray(o.approvals) ? o.approvals : [], // P0-1：审批历史（含 rejected(auto)）
-        })),
+        ledger: ledgerTasks,
         pendingApprovals,
         reconcile, // P0-1：DSH 侧对账结果 {checked, unknown[]}
         session,

@@ -129,7 +129,7 @@ deferred 后台结果可能不来（宿主重启等）。用户再次开口问�
 </script>
 ```
 
-数据缺失处理：usage 为 null 时「输入/输出/缓存」格省略（指标区只留耗时）；缓存命中率 = cacheReadTokens ÷ (inputTokens + cacheReadTokens) 四舍五入百分比；缓存增量 = 本次 cacheReadTokens − 同会话上一条任务（从插件数据目录 tasks.jsonl 按 sessionId 匹配查上一终态）的 cacheReadTokens，正数带 + 号，查不到上一条（新会话首单）时按本次值显示；两者同格互斥显示，标签随切换变（缓存命中率 ⇄ 缓存增量），点「切换」轮换；status=error 时结论下方加「错误：{error 摘要}」；错误摘要也一并折叠进明细区（默认区保持四项）。
+数据缺失处理：usage 为 null 时「输入/输出/缓存」格省略（指标区只留耗时）；缓存命中率 = cacheReadTokens ÷ (inputTokens + cacheReadTokens) 四舍五入百分比（该指标反映 DeepSeek 前缀缓存，几乎所有任务都接近 100%，参考意义有限，会话延续收益看缓存增量）；缓存增量**直接取 dsh_status details.ledger[].cacheDelta 字段**（插件已按同 sessionId 上一终态算好），正数带 + 号，cacheDelta 为 null（首单/窗口外无对比基准）时显示「—」，**禁止自行估算或按本次值显示**；两者同格互斥显示，标签随切换变（缓存命中率 ⇄ 缓存增量），点「切换」轮换；status=error 时结论下方加「错误：{error 摘要}」；错误摘要也一并折叠进明细区（默认区保持四项）。
 
 ### 审批卡片（发现挂起审批时调用）
 

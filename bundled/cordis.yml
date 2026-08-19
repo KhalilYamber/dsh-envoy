@@ -1,0 +1,136 @@
+# DSH Envoy bundled 腿 SDK runtime 配置（薄桥 2.0）
+# 组成：官方 examples/jsonrpc-agent/cordis.yml 原文（unattended coding agent）
+#       + 官方 dsh-base/cordis.patch.yml 的沙箱组合行原文（fail-closed 语义）
+# 保真说明：全部插件与配置行为均为官方本体，本文件仅做官方原文组合，零复刻、零裁剪。
+# 沙箱语义：DSH_PERMISSION_MODE env 驱动（缺省 workspace-write）：
+#   workspace-write/read-only → 越界被沙箱拒；无审批通道（无 Host/UI/wire 方法）→ fail closed
+#   danger-full-access → approval policy=never，全程放行（带授权重派语义）
+# stdout 保留给 JSON-RPC 协议；勿加控制台 logger。
+
+# ===== 官方 examples/jsonrpc-agent/cordis.yml 原文（Unattended coding-agent）=====
+
+# Unattended coding-agent deployment for the bundled dsh-jsonrpc-agent runtime.
+# stdout is reserved for JSON-RPC; do not add a console logger or terminal UI.
+
+- id: sdk-jsonrpc-server
+  name: '@deepseek-ai/dsh-sdk-jsonrpc-server'
+  config:
+    maxTokensAsSuccess: !!js "process.env.DSH_MAX_TOKENS_AS_SUCCESS === undefined ? true : JSON.parse(process.env.DSH_MAX_TOKENS_AS_SUCCESS)"
+
+# The DeepSeek adapter. Shipped default: full thinking at max effort on every
+# request; exact-model resolution materializes request defaults before logging.
+# The model arrives per session over JSON-RPC, so it is not pinned here.
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+  config:
+    thinking: enabled
+    reasoningEffort: max
+
+# Managed child-process groups for the shell executor (spawn/kill/output plumbing).
+- id: subprocess
+  name: '@deepseek-ai/dsh-subprocess-local'
+
+# Shell 与 fs service 由下方官方沙箱行提供（bash-sandbox / pwsh-sandbox / fs-sandbox），
+# 官方模板的裸 bash-local / fs-local 行与此冲突，按官方 dsh-base 组合语义不挂载。
+
+- id: agent-spine
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    persona: !!js process.env.DSH_SYSTEM_PROMPT ?? 'You are a coding agent.'
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolBash: false
+    toolJobs: false
+
+- id: sessions
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: !!js process.env.DSH_SESSION_ROOT ?? './.sessions'
+    # Snapshot runs read the raw JSONL back; production keeps zstd frames.
+    compression: !!js "process.env.DSH_SNAPSHOT === undefined ? 'zstd' : 'none'"
+
+- id: session-checkpoints
+  name: '@deepseek-ai/dsh-session-checkpoint-policy'
+
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+
+- id: subagent-spawn-in-process
+  name: '@deepseek-ai/dsh-subagent-spawn-in-process'
+  config:
+    providerName: spawn
+
+- id: tool-subagent
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: spawn
+    toolName: subagent
+    enableRunInBackground: false
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+- id: fs-observation-policy
+  name: '@deepseek-ai/dsh-fs-observation-policy'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: token-meter
+  name: '@deepseek-ai/dsh-token-meter'
+
+- id: compaction-basic
+  name: '@deepseek-ai/dsh-compaction-basic'
+  config:
+    thresholdRatio: 0.8
+    retainRatio: 0.16
+    maxTokens: 8192
+    compactionRetries: 1
+
+# ===== 官方 dsh-base/cordis.patch.yml 沙箱组合行原文（fail-closed 语义）=====
+
+# Every shipped CLI mode starts with the same file-effect boundary.
+# The environment remains an explicit deployment override; otherwise fresh
+# sessions pin workspace-write + ask through the permission service below.
+- id: sandbox
+  name: '@deepseek-ai/dsh-sandbox-local'
+
+- id: sandbox-policy
+  name: '@deepseek-ai/dsh-sandbox-policy'
+  config:
+    mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
+    workspaceRoot: !!js process.cwd()
+
+- id: bash-sandbox
+  name: '@deepseek-ai/dsh-bash-sandbox'
+  disabled: !!js process.platform === 'win32'
+  config:
+    timeoutMs: 60000
+
+- id: pwsh-sandbox
+  name: '@deepseek-ai/dsh-pwsh-sandbox'
+  disabled: !!js process.platform !== 'win32'
+
+- id: approval
+  name: '@deepseek-ai/dsh-user-approval'
+  config:
+    policy: !!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"
+
+- id: shell-env
+  name: '@deepseek-ai/dsh-shell-env'
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# The sandboxed filesystem provider. `cwd` defaults to `process.cwd()`; an
+# overlay can pin another workspace.
+- id: fs-sandbox
+  name: '@deepseek-ai/dsh-fs-sandbox'

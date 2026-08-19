@@ -3,7 +3,7 @@
 // 流程：取单例 runner（无则「无需取消」）→ 定位目标任务（缺省取消唯一运行任务；
 //       多个在跑时须传 sessionId/opId 指定）→ runner.cancelRequested（abort 联动：
 //       外接任务状态机收到中断后补发 session.cancel，终态 aborted，协议实测 5.3；
-//       内置 headless 直接 taskkill 进程树）
+//      内置 bundled 直接 close SDK runtime（官方放弃语义））
 //       → 任务记录标记 cancelling（终态落地时被 aborted/error 覆盖）→ 返回取消结果。
 //       → 会话路由摘除（取消即废弃：该会话不再作为同工程的延续目标）。
 // 幂等：无运行任务 / 目标不存在均返回「无需取消」，不报错。
@@ -26,7 +26,7 @@ export const name = 'dsh_cancel';
 
 export const description =
   '取消运行中的 dsh 任务（止损）：不传 id 时取消唯一运行中的任务；有多个任务在跑时须传 id 指定。' +
-  '外接模式传 sessionId（内部中断会话，任务以 aborted 终态收尾）；内置 headless 模式传 opId（直接终止 headless 进程树）。' +
+  '外接模式传 sessionId（内部中断会话，任务以 aborted 终态收尾）；内置 bundled 模式传 opId（关闭 SDK runtime 进程，任务以 aborted 终态收尾）。' +
   '幂等：无运行任务时返回「无需取消」。';
 
 export const parameters = {
@@ -35,7 +35,7 @@ export const parameters = {
     sessionId: {
       type: 'string',
       description:
-        '要取消任务的 id：外接模式用会话 id；内置 headless 模式用 opId（dsh_run 返回 / dsh_status 任务记录里带）。' +
+        '要取消任务的 id：外接模式用会话 id；内置 bundled 模式用 opId（dsh_run 返回 / dsh_status 任务记录里带）。' +
         '缺省取消唯一运行中的任务；有多个任务在跑时必须传',
     },
   },
@@ -104,11 +104,11 @@ async function cancel(ctx) {
   }
 
   const ok = runner.cancelRequested(target.opKey ?? target.sessionId ?? sid);
-  const embedded = (s.connection?.effectiveMode ?? null) === 'embedded';
+  const bundled = (s.connection?.effectiveMode ?? null) === 'bundled';
 
-  // 会话路由摘除（取消即废弃：该会话不再作为同工程的延续目标；embedded 无会话概念跳过）
+  // 会话路由摘除（取消即废弃：该会话不再作为同工程的延续目标；bundled 无会话概念跳过）
   const cancelledSid = target.sessionId ?? null;
-  if (!embedded && cancelledSid) {
+  if (!bundled && cancelledSid) {
     try {
       const routes = sharedSessionRoutes(s);
       const removed = routes.removeBySessionId(cancelledSid);
@@ -134,8 +134,8 @@ async function cancel(ctx) {
 
   const sessionIdOut = target.sessionId ?? sid;
   const short = sessionIdOut ? `${String(sessionIdOut).slice(0, 12)}…` : '（会话尚未建立）';
-  const doneText = embedded
-    ? `已请求取消任务 ${target.opKey ?? sid}：headless 进程树已终止，任务以 aborted 终态收尾`
+  const doneText = bundled
+    ? `已请求取消任务 ${target.opKey ?? sid}：SDK runtime 进程已关闭，任务以 aborted 终态收尾`
     : `已请求取消任务 ${target.opKey ?? sid}（会话 ${short}）：dsh agent 将收到中断，任务以 aborted 终态收尾`;
   return {
     content: [

@@ -1,6 +1,6 @@
 // dsh-status.js —— 查进度工具（dsh_status，只读）
 // 协议细节以 DSH 官方实现与实测行为为准（DSH 0.1.0-rc.6）。
-// 返回：连接模式与健康（external 探测 / embedded headless 任务进程状态）、运行中任务、
+// 返回：连接模式与健康（external 探测 / bundled SDK runtime 任务进程状态）、运行中任务、
 //       近期任务记录（globalThis.__dshBridge.ops，含审批历史；重启后从 tasks.jsonl 恢复）、挂起审批列表（用 dsh_approve 应答；内置模式恒无）、
 //       DSH 侧对账（P0-1：external 健康时列活动会话，找出「不在本地任务记录」的会话，只呈现事实不自动接管）。
 // 外接模式传 sessionId 时尝试从 DSH 查该会话状态（client.listSessions）。
@@ -16,8 +16,8 @@ import { manifestDefault } from '../lib/manifest-defaults.js';
 export const name = 'dsh_status';
 
 export const description =
-  '查 dsh 连接状态与任务记录（只读，无副作用）：连接模式与健康（外接服务探测 / 内置 headless 任务进程状态）、运行中任务、' +
-  '近期任务记录（最近 50 条，含每条任务的审批历史）、挂起审批列表（approvalId/toolName/args 摘要/理由，用 dsh_approve 应答；内置 headless 模式恒无审批）、' +
+  '查 dsh 连接状态与任务记录（只读，无副作用）：连接模式与健康（外接服务探测 / 内置 bundled 任务进程状态）、运行中任务、' +
+  '近期任务记录（最近 50 条，含每条任务的审批历史）、挂起审批列表（approvalId/toolName/args 摘要/理由，用 dsh_approve 应答；内置 bundled 模式恒无审批）、' +
   'DSH 侧对账（外接健康时自动列出「DSH 侧活动会话但不在本地任务记录」的情况，宿主重启后对账用）。' +
   '外接模式传 sessionId 可查询该 dsh 会话是否在当前任务记录。';
 
@@ -27,7 +27,7 @@ export const parameters = {
     sessionId: {
       type: 'string',
       description:
-        '可选（仅外接模式有意义）：查询指定 dsh 会话是否在当前任务记录（存在/不存在，尽力返回 cwd 等摘要）。内置 headless 模式无会话句柄',
+        '可选（仅外接模式有意义）：查询指定 dsh 会话是否在当前任务记录（存在/不存在，尽力返回 cwd 等摘要）。内置 bundled 模式无会话句柄',
     },
   },
   required: [],
@@ -128,11 +128,11 @@ async function status(ctx) {
     external = { port, healthy };
   }
   let embedded = null;
-  const headless = conn?.headless ?? null; // DshConnection 内部句柄，只读列任务进程状态
-  if (headless) {
-    const procs = [...(headless._runs ?? new Map()).values()];
+  const sdkLeg = conn?.sdkLeg ?? null; // DshConnection 内部句柄，只读列任务进程状态
+  if (sdkLeg) {
+    const procs = [...(sdkLeg._runs ?? new Map()).values()];
     embedded = {
-      ready: Boolean(headless._binPath),
+      ready: Boolean(sdkLeg._resolved),
       processes: procs.map((e) => ({
         opId: e.opKey ?? null,
         tag: e.tag ?? null,
@@ -268,9 +268,9 @@ async function status(ctx) {
   let session = null;
   let sessionNote = null;
   if (sessionId) {
-    if (effectiveMode === 'embedded') {
+    if (effectiveMode === 'bundled') {
       sessionNote =
-        '内置 headless 模式无会话句柄（每次任务独立会话），无法按 sessionId 查询；用 opId 看任务记录即可';
+        '内置 bundled 模式无会话句柄（每次任务独立进程），无法按 sessionId 查询；用 opId 看任务记录即可';
     } else {
       let client = null;
       try {
@@ -311,8 +311,8 @@ async function status(ctx) {
   }
   if (embedded) {
     lines.push(
-      `内置 headless：${embedded.running > 0 ? `${embedded.running} 个任务进程运行中` : '无运行中的任务进程'}` +
-        `（无端口、无审批通道，越界操作自动拒绝${embedded.ready ? '' : '，依赖尚未就绪'}）`
+      `内置 bundled：${embedded.running > 0 ? `${embedded.running} 个任务进程运行中` : '无运行中的任务进程'}` +
+        `（官方 SDK runtime、无审批通道，越界操作自动拒绝${embedded.ready ? '' : '，依赖尚未就绪'}）`
     );
     for (const p of embedded.processes.slice(-5)) {
       lines.push(

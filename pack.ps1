@@ -22,7 +22,7 @@ $Version = $Manifest.version
 $ZipName = "dsh-bridge-$Version.zip"
 $ZipPath = Join-Path $OutDir $ZipName
 
-$Include = @('index.js', 'manifest.json', 'README.md', 'LICENSE', 'lib', 'tools', 'skills', 'scripts')
+$Include = @('index.js', 'manifest.json', 'README.md', 'LICENSE', 'lib', 'tools', 'skills', 'scripts', 'bundled')
 
 if (Test-Path $OutDir) { Remove-Item $OutDir -Recurse -Force }
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null

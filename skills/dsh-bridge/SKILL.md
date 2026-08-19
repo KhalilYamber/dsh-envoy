@@ -1,6 +1,6 @@
 ---
 name: dsh-bridge
-description: DSH Bridge 插件（Hana 与 DeepSeek Harness 的交接层）使用指南。触发场景：用户想把 coding 类任务交给本机 DSH 执行时说「派给 DSH」「让 DSH 做」「用 DSH 帮我改」「交给 DSH 处理」「DSH 上」等，或上下文明显是「把工作派给 DeepSeek Harness」。插件提供 dsh_run / dsh_status / dsh_approve / dsh_cancel / dsh_diagnose 五个工具，双模式（内置 headless / 外接 Web）自动切换。遇到 DSH 任务失败、审批应答、连接模式问题优先读本技能再动手。
+description: DSH Bridge 插件（Hana 与 DeepSeek Harness 的交接层）使用指南。触发场景：用户想把 coding 类任务交给本机 DSH 执行时说「派给 DSH」「让 DSH 做」「用 DSH 帮我改」「交给 DSH 处理」「DSH 上」等，或上下文明显是「把工作派给 DeepSeek Harness」。插件提供 dsh_run / dsh_status / dsh_approve / dsh_cancel / dsh_diagnose 五个工具，双模式（内置 bundled 官方 SDK runtime / 外接 Web）自动切换。遇到 DSH 任务失败、审批应答、连接模式问题优先读本技能再动手。
 ---
 
 # DSH Envoy 使用指南（dsh-bridge）
@@ -10,32 +10,33 @@ Hana 与 DeepSeek Harness（DSH）之间的交接层：Hana 把任务书外包�
 ## 双模式速记
 
 - **external（外接）**：直连用户自跑的 DSH（默认 127.0.0.1:3080）。越界操作**挂起等审批**，可经 dsh_approve 应答或用户在 DSH 界面处理；无人应答 `approvalTimeoutMs`（默认 180s）自动拒绝。
-- **embedded（内置）**：插件用 headless 拉起一次性进程，无界面无审批——越界**立即被拒**（fail closed），agent 在报告里说明。**退出码不可靠（越界被拒也退 0），判断成败以任务报告文本为准**。想放行越界只能带授权重派（`permission=danger-full-access`）。
+- **bundled（内置）**：官方 SDK runtime（官方 npm 安装于插件数据目录 bundled/），无界面无审批——越界**立即被拒**（fail closed），agent 在报告里说明。想放行越界只能带授权重派（`permission=danger-full-access`）。
 - **auto（默认）**：探测到外部服务走外接，否则内置。切换无需重启，对新任务生效。
+- **双腿能力不对称（官方协议边界）**：agentPreset、sessionId 续跑、审批仅外接可用；内置无预设通道、每任务独立进程（进程亡即弃会话）。
 
 ## 工具速查
 
-- `dsh_run(task, cwd?, timeout?, wait?, sessionId?, sessionPolicy?, permission?)`：派活。默认异步（完成后宿主唤醒），`wait=true` 同步等结果。`sessionId` 仅外接（resume）；`permission` 仅内置。
+- `dsh_run(task, cwd?, timeout?, wait?, sessionId?, sessionPolicy?, agentPreset?, permission?)`：派活。默认异步（完成后宿主唤醒），`wait=true` 同步等结果。`sessionId`/`sessionPolicy`/`agentPreset` 仅外接（resume/路由/预设）；`permission` 仅内置。
 - `dsh_status(sessionId?)`：查进度与任务记录（文本展示 20 条、details 全量 50 条）、挂起审批、会话路由表。
 - `dsh_approve(approvalId, outcome?)`：应答审批（`allowed-once` 默认 / `rejected`）；内置模式调用返回说明性提示。
 - `dsh_cancel(sessionId?)`：止损。外接传 sessionId、内置传 opId（省略取消唯一运行中任务）；幂等。
-- `dsh_diagnose()`：连不上 DSH 时先体检——① Node（运行级验证+候选列表）② 依赖（运行级验证抓假就绪）③ 连接 ④ 上次退出记录，每项带修复指引。
+- `dsh_diagnose()`：连不上 DSH 时先体检——① Node（运行级验证+候选列表）② bundled 依赖（官方 SDK runtime 就位+装载验证抓假就绪）③ 连接 ④ 上次退出记录，每项带修复指引。
 
 ## 首次配置
 
-external 零配置。embedded 需设置界面填 `apiKey`；`nodePath`/`dshInstallDir` 留空自动探测（Node 24+，找不到时 dsh_diagnose 给候选列表）。
+external 零配置。bundled 需一次官方安装：把插件 bundled/ 目录（cordis.yml + package.json）同步到插件数据目录后执行官方命令 `npm install --prefix <插件数据目录>/bundled`，再在设置界面填 `apiKey`；`nodePath` 留空自动探测（Node 24+，找不到时 dsh_diagnose 给候选列表）。
 
 ## 派单工作流
 
 ### 0. 派单后盯梢（无条件必做，不依赖任何提示）
 
-external 异步派单后**必须**盯梢循环：`exec_command` 等待 15~20 秒 → 调 `dsh_status` → 发现挂起审批转第 3 步内联问询；未发现审批且任务未结束，再盯 1~2 轮（共最多 5 轮）。到上限如实告知用户「任务仍在跑」，不要无限等。embedded 无审批，等终态即可，可用 `dsh_status` 对账。
+external 异步派单后**必须**盯梢循环：`exec_command` 等待 15~20 秒 → 调 `dsh_status` → 发现挂起审批转第 3 步内联问询；未发现审批且任务未结束，再盯 1~2 轮（共最多 5 轮）。到上限如实告知用户「任务仍在跑」，不要无限等。bundled 无审批，等终态即可，可用 `dsh_status` 对账。
 
 ### 0.5 会话延续（项目级路由，仅外接，派单前想一下）
 
 - 默认 `sessionPolicy=auto`：按 cwd 查路由表，同工程有活跃会话自动复用（省 token）；未命中则新建并登记。`new`：强制新建，自动从旧会话提取交接摘要拼进任务书开头（「这是延续会话…请继续」）。显式传 sessionId 优先（不查表不写表）。
 - 何时用 new：DSH 侧上下文太满、旧会话状态混乱、想干净重来（问用户或用户主动说）。
-- `dsh_cancel` 后对应路由自动摘除；`dsh_status` 展示「会话路由表」供判断。embedded 无会话概念，sessionPolicy 不生效。
+- `dsh_cancel` 后对应路由自动摘除；`dsh_status` 展示「会话路由表」供判断。bundled 无会话概念，sessionPolicy 不生效。
 
 ### 1. 任务分级与复述对齐（必做；机制细节不明说给用户）
 
@@ -53,7 +54,7 @@ external 异步派单后**必须**盯梢循环：`exec_command` 等待 15~20 秒
 ```
 
 - **外接（两阶段确认）**：DSH 复述后回合结束 → Agent 核对（目标/边界/交付物；拿不准转问用户）→ 正确发「理解正确，开始执行」；有偏差指出偏差，DSH 重新复述后再确认。
-- **embedded（单发无交互）**：任务书改为「先复述理解（写在报告开头），然后执行」，Agent 在终态核对理解与产出一致性，有偏差向用户说明并重派。
+- **bundled（单发无交互）**：任务书改为「先复述理解（写在报告开头），然后执行」，Agent 在终态核对理解与产出一致性，有偏差向用户说明并重派。
 
 ### 2. 预授权问询
 
@@ -164,16 +165,16 @@ deferred 后台结果可能不来（宿主重启等）。用户再次开口问�
 验收：<可检查的验收标准，编号列出>
 ```
 
-**复述指令（按第 1 步分级）**：强制/默认级别在任务书最前插入复述指令（见第 1 步）；极简任务不加。embedded 模式每次任务都是全新会话（无上文），任务书更要自包含，且复述指令改为「先复述理解（写在报告开头），然后执行」；外接模式可传 sessionId 续跑保留上文。
+**复述指令（按第 1 步分级）**：强制/默认级别在任务书最前插入复述指令（见第 1 步）；极简任务不加。bundled 模式每次任务都是全新进程（无上文），任务书更要自包含，且复述指令改为「先复述理解（写在报告开头），然后执行」；外接模式可传 sessionId 续跑保留上文。
 
 ## 排错表
 
 | 现象 | 处理 |
 |---|---|
 | 连不上 DSH，报错含糊 | 调 `dsh_diagnose` 体检：按 ①Node ②依赖 ③连接 ④上次退出 定位坏在哪一环，每项带修复指引 |
-| dsh_run 报「DSH 服务未运行」 | 外接模式确认用户 DSH 在跑（127.0.0.1:3080），或改 embedded 模式 |
-| dsh_run 报「内置（headless）就绪失败」 | 读报错：apiKey 未配填 apiKey；找不到 DSH 安装填 dshInstallDir；node 不存在填 nodePath（候选见 dsh_diagnose ①） |
-| dsh_diagnose ② 报「依赖不完整（假就绪）」 | node_modules 缺失/损坏或 junction 断链：重新 npm ci 或删插件数据目录 dsh-node_modules 后重试 |
+| dsh_run 报「DSH 服务未运行」 | 外接模式确认用户 DSH 在跑（127.0.0.1:3080），或改 bundled 模式 |
+| dsh_run 报「内置（bundled）就绪失败」 | 读报错：apiKey 未配填 apiKey；bundled 依赖未装跑官方安装命令（见「首次配置」）；node 不存在填 nodePath（候选见 dsh_diagnose ①） |
+| dsh_diagnose ② 报「依赖不完整（假就绪）」 | bundled node_modules 缺失/损坏：重新执行官方安装命令 `npm install --prefix <插件数据目录>/bundled` |
 | 内置任务「完成」但报告说被拒 | 越界 fail closed。问用户是否带授权重派（permission=danger-full-access） |
 | 外接任务一直 running | dsh_status 看是否有挂起审批；用户可在 DSH 界面处理，或调 dsh_approve；超时自动拒绝（180s） |
 | 任务失败 status=error | 读 conclusion 中的错误信息；stopReason=timeout 说明超时，可调大 timeout 重派 |

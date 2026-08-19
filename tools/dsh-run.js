@@ -2,7 +2,7 @@
 // 协议细节以 DSH 官方实现与实测行为为准（DSH 0.1.0-rc.6）。
 // 流程：liveConfig 合并（直读 dataDir/config.json 的 global 键优先，协议实测 6.2）
 //       → 懒建单例 DshConnection 并 ensure()（失败转人话）
-//       → LabelStore 取号【MMdd-NN】→ 单例 runner（embedded=HeadlessRunner / external=TaskRunner）→ run()
+//       → LabelStore 取号【MMdd-NN】→ 单例 runner（bundled=SdkLeg / external=TaskRunner）→ run()
 //       → wait=false（默认异步）：立即返回「已派单」，后台完成后经宿主 deferred 通道唤醒（register/resolve/fail）
 //       → wait=true（同步）：直接等终态返回（外接模式已知边界：同步无审批通知，协议实测 4.5）
 // 任务记录：globalThis.__dshBridge.ops（进程内 Map；终态增量落盘 <dataDir>/tasks.jsonl，
@@ -23,11 +23,12 @@ export const description =
   '把任务交给 DeepSeek Harness（dsh）执行：dsh 是完整编码 agent（官方 API、沙箱 bash 与文件系统工具、上下文压缩、subagent 级联），' +
   '任务文本作为用户消息发给 dsh agent，cwd 是其沙箱工作目录（缺省用插件配置 defaultCwd）。' +
   '默认异步：立即返回「已派单」，任务完成后宿主经后台消息自动唤醒、结果送达；传 wait=true 同步等待最终结果（长任务会阻塞当前回合）。' +
-  '内置（headless）模式：无审批通道，越界操作被沙箱立即拒绝（fail closed），agent 在任务报告里说明；可带授权重派（permission=danger-full-access）。' +
+  '内置（bundled）模式：官方 SDK runtime，无审批通道，越界操作被沙箱立即拒绝（fail closed），agent 在任务报告里说明；可带授权重派（permission=danger-full-access）。' +
   '外接模式：agent 请求越界权限时任务挂起，插件经 deferred 通道发审批通知（带 opId/approvalId/理由/参数原文），用 dsh_approve 应答；' +
   '无人应答超时自动拒绝（approvalTimeoutMs，0=禁用）。' +
   '注意：外接同步模式（wait=true）无审批通知（已知边界），挂起审批只能靠超时自动拒绝或在 dsh Web UI 处理。' +
   'resume：外接模式传 sessionId 复用已有会话继续（agent 保留上文）；内置模式不支持 resume。' +
+  'agentPreset：仅外接模式生效（session.create 透传预设 id，预设传递不复制）；内置 bundled 模式无预设通道，该参数被忽略。' +
   '进度与任务记录用 dsh_status 查看；止损用 dsh_cancel。';
 
 export const parameters = {
@@ -53,22 +54,29 @@ export const parameters = {
     },
     sessionId: {
       type: 'string',
-      description: '复用已有 dsh 会话（resume）：传上次任务的 sessionId 则在该会话继续，agent 保留上文。目标会话应已空闲。仅外接模式支持；内置 headless 模式传此参数会报错。显式传 sessionId 时优先于 sessionPolicy（不查路由表、不写路由表）',
+      description: '复用已有 dsh 会话（resume）：传上次任务的 sessionId 则在该会话继续，agent 保留上文。目标会话应已空闲。仅外接模式支持；内置 bundled 模式传此参数会报错。显式传 sessionId 时优先于 sessionPolicy（不查路由表、不写路由表）',
     },
     sessionPolicy: {
       type: 'string',
       enum: ['auto', 'new'],
       description:
-        '会话策略（仅外接模式生效；内置 headless 无会话概念，此参数被忽略）：' +
+        '会话策略（仅外接模式生效；内置 bundled 无会话概念，此参数被忽略）：' +
         'auto（默认）= 按工作目录（cwd）查会话路由表，该工程有活跃会话则自动复用（内部传 sessionId，agent 保留上文，省 token）；未命中则新建并登记进路由表。' +
         'new = 强制新建会话；新建前自动从旧会话（同 cwd 的活跃会话，若有）提取交接摘要，拼在任务书开头（这是延续会话…请继续），新会话登记进路由表。' +
         '何时用 new：DSH 侧上下文太满、旧会话状态混乱、或想干净重来。决定权在用户口头指示，本机制不做自动检测',
+    },
+    agentPreset: {
+      type: 'string',
+      description:
+        'Agent 预设 id（仅外接模式生效）：新建会话时经 session.create 透传给 DSH（预设传递不复制，插件不存任何预设定义）。' +
+        '缺省用插件配置 agentPreset；resume（传 sessionId）时该值被忽略（延续已有会话的预设）。' +
+        '内置 bundled 模式无预设通道（官方 SDK 协议无此参数），该参数被忽略。',
     },
     permission: {
       type: 'string',
       enum: ['workspace-write', 'danger-full-access', 'read-only'],
       description:
-        '内置 headless 模式：本次派单的沙箱权限模式（覆盖插件配置 permissionMode，单次生效）。' +
+        '内置 bundled 模式：本次派单的沙箱权限模式（覆盖插件配置 permissionMode，单次生效）。' +
         '带授权重派越界任务时用 danger-full-access（该模式下全程不审批）。外接模式传此参数会报错。' +
         '安全约束：仅当用户在对话中明确授权后方可由 Agent 使用；不得自行决定升级到 danger-full-access',
     },
@@ -273,6 +281,9 @@ async function run(ctx) {
   if (permission && !['workspace-write', 'danger-full-access', 'read-only'].includes(permission)) {
     throw new Error('permission 只支持 workspace-write / danger-full-access / read-only');
   }
+  // agentPreset：显式传参优先，否则插件配置 agentPreset（仅 external 生效；bundled 忽略）
+  const agentPreset =
+    String(ctx?.agentPreset ?? '').trim() || String(cfg.agentPreset ?? '').trim() || null;
 
   // ---- 1. 连接：懒建单例 DshConnection 并 ensure() ----
   let conn = s.connection;
@@ -294,21 +305,21 @@ async function run(ctx) {
     if (/apiKey|DEEPSEEK_API_KEY/.test(msg)) {
       throw new Error('内置模式需要 apiKey。请到 Hana 的插件设置（DSH Envoy）填写 DeepSeek API Key 后再派单。');
     }
-    throw new Error(`DSH 内置（headless）就绪失败：${msg}`);
+    throw new Error(`DSH 内置（bundled）就绪失败：${msg}`);
   }
   const mode = conn.effectiveMode;
 
   // P1-1：external 模式不支持 permission（静默忽略比报错危险），明确报错且不派单
   if (mode === 'external' && permission) {
     throw new Error(
-      'permission 参数仅内置 headless 模式有效。外接模式下 DSH 的权限由审批流程管理：审批挂起时用 dsh_approve 放行即可，无需 permission 参数。'
+      'permission 参数仅内置 bundled 模式有效。外接模式下 DSH 的权限由审批流程管理：审批挂起时用 dsh_approve 放行即可，无需 permission 参数。'
     );
   }
   // P1-2.1：生效模式标注（同步/异步返回文本都带）
   const modeLine =
     mode === 'external'
       ? `生效模式：external（直连您自跑的 DSH @127.0.0.1:${Number(cfg.externalPort || cfg.webPort || manifestDefault('webPort'))}）`
-      : '生效模式：embedded-headless（插件自拉一次性进程，DSH_HOME 隔离于插件数据目录）';
+      : '生效模式：bundled（官方 SDK runtime，依赖官方 npm 安装于插件数据目录 bundled/）';
 
   // ---- 2. 标签【MMdd-NN】 ----
   let labels = null;
@@ -321,16 +332,16 @@ async function run(ctx) {
   }
 
   // ---- 3. 单例 runner（dsh_approve / dsh_cancel / dsh_status 依赖它）：
-  //      embedded → conn.headless（HeadlessRunner，无审批无会话句柄）；external → TaskRunner ----
+  //      bundled → conn.sdkLeg（SdkLeg，无审批无会话句柄）；external → TaskRunner ----
   let runner;
-  if (mode === 'embedded') {
+  if (mode === 'bundled') {
     if (sidParam) {
       throw new Error(
-        '内置 headless 模式不支持 resume：每次任务都是全新独立会话（无会话句柄）。外接模式才可传 sessionId'
+        '内置 bundled 模式不支持 resume：每次任务都是全新独立会话（进程亡即弃）。外接模式才可传 sessionId'
       );
     }
     // 内置模式无会话概念：sessionPolicy 不生效（行为与现状一致，不报错）
-    runner = conn.headless;
+    runner = conn.sdkLeg;
     s.runner = runner;
   } else {
     runner = s.runner;
@@ -367,7 +378,8 @@ async function run(ctx) {
     startedAt: new Date().toISOString(),
     sessionId: sidParam,
     wait: isSync,
-    policy: mode === 'embedded' ? null : policy, // 会话策略（路由决策人话留到执行段）
+    policy: mode === 'bundled' ? null : policy, // 会话策略（路由决策人话留到执行段）
+    agentPreset: mode === 'external' ? agentPreset : null, // 预设留痕（bundled 无预设通道）
     output: null,
     approvals: [], // P0-1：审批历史（TaskRunner 挂起/解决/自动拒绝时写入，任务结束后保留）
   };
@@ -383,10 +395,10 @@ async function run(ctx) {
   // bus/sessionPath 已在 run() 开头从合并 ctx 提取（宿主 execute(input, ctx) 双参约定，第二参含会话上下文）
   // 通道不可用不阻塞派单：审批靠前台盯梢 + dsh_status 对账，结果靠主动查询，deferred 只是增强
 
-  // 审批挂起回调：每单挂载（闭包携带当单的 opId/bus/sessionPath）；仅 external（headless 无审批事件）
+  // 审批挂起回调：每单挂载（闭包携带当单的 opId/bus/sessionPath）；仅 external（bundled 无审批事件）
   // 动机：runner 单例的 onApproval 会被后派单覆盖，审批事件到达时闭包可能属于别的单，
   //       故按 pending.sessionId 反查 _runs 归属正确 opId（同会话排队时先派单先匹配，与 queue 执行序一致）。
-  if (mode !== 'embedded') {
+  if (mode === 'external') {
     runner.onApproval = (pending) => {
       // opId 反查：TaskRunner 运行记录 ctx.opKey 即派单时传入的 opId（ctx.sessionId 随会话建立写入）
       let approveOpId = opId;
@@ -409,7 +421,7 @@ async function run(ctx) {
     };
   }
 
-  // ---- 5.5 会话策略决策（仅 external；embedded 已在上方忽略） ----
+  // ---- 5.5 会话策略决策（仅 external；bundled 已在上方忽略） ----
   // 优先级：显式 sessionId > sessionPolicy（auto/new）；无 cwd 时路由不生效（按现状新建）
   const routes = sessionRoutes(s);
   let routeCwd = null; // 参与路由的 cwd（null = 不查表不写表）
@@ -417,7 +429,7 @@ async function run(ctx) {
   let resumeSid = sidParam; // 实际传给 runner 的 sessionId（auto 命中时从路由表取）
   let effectiveTask = task; // new 模式带交接前缀的任务书
 
-  if (mode !== 'embedded') {
+  if (mode === 'external') {
     if (sidParam) {
       routeAction = 'explicit'; // 显式 resume：不查表不写表（现有行为不变）
     } else if (cwd) {
@@ -455,8 +467,9 @@ async function run(ctx) {
     timeoutMs,
     opId,
     signal: ctx?.signal ?? undefined, // 宿主中断联动（协议实测 5.3 的 abort）
-    ...(mode === 'embedded' && permission
-      ? { env: { DSH_PERMISSION_MODE: permission } } // 带授权重派（headless-behavior.md 实测结论）
+    ...(mode === 'external' && agentPreset ? { agentPreset } : {}), // 预设只传外接腿
+    ...(mode === 'bundled' && permission
+      ? { env: { DSH_PERMISSION_MODE: permission } } // 带授权重派（spike-4 实测结论）
       : {}),
     onProgress: (p) => {
       const e = ops.get(opId);
@@ -494,7 +507,7 @@ async function run(ctx) {
       appendTaskRow(s, e); // 任务记录落盘：终态快照增量追加（写失败静默；每 op 只落一次）
     }
     // 路由登记：拿到真实 sessionId 且该 cwd 参与路由（auto 新建 / new / 复用均刷新时间戳）
-    if (routeCwd && final?.sessionId && mode !== 'embedded') {
+    if (routeCwd && final?.sessionId && mode === 'external') {
       routes.set(routeCwd, final.sessionId);
     }
   };
@@ -526,8 +539,8 @@ async function run(ctx) {
     await registerPromise; // 对齐实物：register 落地后再返回（失败/不可用也照常返回）
     // P0-2：工具返回文本直接嵌入下一步指令（Agent 必读，不依赖 SKILL 自觉）
     const followup =
-      mode === 'embedded'
-        ? '内置 headless 模式无审批：等待终态即可，无需盯梢；任务完成后宿主经后台消息带回结果，随时可用 dsh_status 对账。' +
+      mode === 'bundled'
+        ? '内置 bundled 模式无审批：等待终态即可，无需盯梢；任务完成后宿主经后台消息带回结果，随时可用 dsh_status 对账。' +
           '越界操作会被沙箱立即拒绝并在任务报告里说明，如需可带授权重派（permission=danger-full-access）。'
         : '⚠️ 派单后请立即盯梢：用 exec_command 等待 15~20 秒后调 dsh_status；若发现挂起审批，立即向用户内联问询' +
           '（呈现 DSH 审批标识、工具名、理由、命令原文），用户答复后调 dsh_approve；未发现审批且任务未结束则再盯 1~2 轮（共最多 5 轮），' +
@@ -571,8 +584,8 @@ async function run(ctx) {
       ? ''
       : `\n[status: ${final?.status}${final?.stopReason ? `, stopReason: ${final.stopReason}` : ''}]`;
   const syncNote =
-    mode === 'embedded'
-      ? '' // headless 无审批，同步模式无「审批挂死」问题（实测：越界立即 fail closed）
+    mode === 'bundled'
+      ? '' // bundled 无审批，同步模式无「审批挂死」问题（实测：越界立即 fail closed）
       : `\n（同步模式无审批通知：任务若中途挂起审批，只能等超时自动拒绝或在 dsh Web UI 处理）`;
   return {
     content: [

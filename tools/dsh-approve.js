@@ -4,10 +4,10 @@
 //   → respondApproval 内已含完整校验（对齐 TaskRunner 的校验链）：
 //     审批存在 → 状态必须 pending（已应答/已解决拒答）→ POST /api/respond 被接受（accepted:true）
 //   → 应答成功本地置 answered。三类错误（不存在/已应答/应答未接受）信息已是人话，直接抛出。
-// 内置 headless 模式：无审批可答（越界 fail closed），返回说明性文本，不报错（SPEC-v0.2 T5）。
+// 内置 bundled 模式：无审批可答（越界 fail closed），返回说明性文本，不报错（对齐 v0.2.5 T5 语义）。
 // 返回结构对齐。
 
-import { HeadlessRunner } from '../lib/headless.js';
+import { SdkLeg } from '../lib/sdk-leg.js';
 
 export const name = 'dsh_approve';
 
@@ -15,7 +15,7 @@ export const description =
   '应答 dsh 任务挂起的权限审批（仅外接模式）：dsh agent 请求越界权限时任务挂起，插件经 deferred 通道发审批通知' +
   '（带 approvalId/toolName/理由/参数原文）。allowed-once（默认）= 放行本次请求，agent 继续执行；' +
   'rejected = 拒绝本次请求。无人应答超时自动拒绝（approvalTimeoutMs，0=禁用）；审批也可在 dsh Web UI 人工处理。' +
-  '内置 headless 模式无挂起审批（越界操作立即 fail closed），调用本工具会得到说明性提示。';
+  '内置 bundled 模式无挂起审批（越界操作立即 fail closed），调用本工具会得到说明性提示。';
 
 export const parameters = {
   type: 'object',
@@ -55,18 +55,18 @@ async function approve(ctx) {
   const s = globalThis.__dshBridge ?? {};
   const runner = s.runner;
 
-  // 内置 headless：无审批可答（越界 fail closed），返回说明性文本，不报错（SPEC-v0.2 T5）
-  if (runner instanceof HeadlessRunner) {
+  // 内置 bundled：无审批可答（越界 fail closed），返回说明性文本，不报错（对齐 v0.2.5 T5 语义）
+  if (runner instanceof SdkLeg) {
     return {
       content: [
         {
           type: 'text',
           text:
-            '内置 headless 模式无挂起审批：越界操作会被沙箱立即拒绝（fail closed），agent 会在任务报告里说明。' +
+            '内置 bundled 模式无挂起审批：越界操作会被沙箱立即拒绝（fail closed），agent 会在任务报告里说明。' +
             '无需应答任何审批；若您允许该越界操作，可带授权重派任务（dsh_run 传 permission=danger-full-access）。',
         },
       ],
-      details: { dsh: { mode: 'embedded', pendingApprovals: 0 } },
+      details: { dsh: { mode: 'bundled', pendingApprovals: 0 } },
     };
   }
 

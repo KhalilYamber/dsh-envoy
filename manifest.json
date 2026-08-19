@@ -2,8 +2,8 @@
   "manifestVersion": 1,
   "id": "dsh-bridge",
   "name": "DSH Envoy",
-  "version": "0.2.5",
-  "description": "DSH Envoy：Hana 与 DeepSeek Harness（DSH）的交接层。一个连接抽象，两种实现：内置（headless 一次性进程，任务记录隔离）或外接（直连您自跑的 DSH，任务记录归您）。五个工具：dsh_run 派活、dsh_status 查进度、dsh_approve 应答审批、dsh_cancel 止损、dsh_diagnose 体检。工作标签【MMdd-NN】分组，会话可续跑（同工程自动延续）。审批：外接模式同步到 Hana 内联问询（180s 无人应答自动拒绝），内置模式越界即拒（可带授权重派）。任务记录落盘（tasks.jsonl），重启后可查历史。",
+  "version": "0.3.0",
+  "description": "DSH Envoy：Hana 与 DeepSeek Harness（DSH）的交接层。薄桥架构：外接直连您自跑的 DSH（配置凭据会话原样保留，审批完整），或内置官方 SDK runtime（官方 npm 安装，无审批通道、越界即拒、可带授权重派）。五个工具：dsh_run 派活（可带 agentPreset）、dsh_status 查进度、dsh_approve 应答审批、dsh_cancel 止损、dsh_diagnose 体检。工作标签【MMdd-NN】分组，外接模式会话可续跑（同工程自动延续）。任务记录落盘（tasks.jsonl），重启后可查历史。",
   "author": "Khalil",
   "minAppVersion": "0.82.0",
   "trust": "full-access",
@@ -24,16 +24,16 @@
       "properties": {
         "mode": {
           "type": "string",
-          "enum": ["auto", "embedded", "external"],
+          "enum": ["auto", "bundled", "external"],
           "default": "auto",
           "title": "连接模式",
-          "description": "auto=探测到外部 DSH 服务就走外接，否则内置；embedded=始终由插件以 headless 模式拉起 dsh（无界面、无端口、无审批通道，越界操作自动拒绝）；external=始终直连用户自跑的 DSH。改后对新任务生效。"
+          "description": "auto=探测到外部 DSH 服务就走外接，否则内置；bundled=内置官方 SDK runtime（官方 npm 安装，无审批通道，越界操作自动拒绝，可带授权重派）；external=始终直连用户自跑的 DSH（审批完整）。改后对新任务生效。"
         },
         "nodePath": {
           "type": "string",
           "default": "",
           "title": "Node.js 可执行文件路径（内置模式）",
-          "description": "内置模式用：启动 dsh headless 进程的 node.exe 绝对路径（需 Node 24+）。可以留空：留空时自动探测（先读配置文件，再找 PATH 中的 node）。找不到时会报错并提示。常见位置：D:\\NodeJS\\node.exe、C:\\Program Files\\nodejs\\node.exe。查看命令：where node（cmd）或 Get-Command node（PowerShell）。外接模式不需要。"
+          "description": "内置模式用：启动官方 SDK runtime 的 node.exe 绝对路径（需 Node 24+）。可以留空：留空时自动探测（先读配置文件，再找 PATH 中的 node）。找不到时会报错并提示。常见位置：D:\\NodeJS\\node.exe、C:\\Program Files\\nodejs\\node.exe。查看命令：where node（cmd）或 Get-Command node（PowerShell）。外接模式不需要。"
         },
         "apiKey": {
           "type": "string",
@@ -69,41 +69,35 @@
           "type": "string",
           "default": "deepseek-v4-flash",
           "title": "dsh 模型",
-          "description": "内置 headless 模式暂未透传模型选择（用 DSH profile 默认模型），保留字段。内置 profile 默认：deepseek-v4-flash。"
+          "description": "内置 bundled 模式的会话模型（官方 SDK initialize 的 model 路由）。默认：deepseek-v4-flash。"
         },
         "agentPreset": {
           "type": "string",
           "enum": ["standard", "code", "cordis", "minimal"],
           "default": "standard",
           "title": "Agent 预设",
-          "description": "内置 headless 模式暂未透传预设选择（用 DSH profile 默认预设），保留字段。"
+          "description": "仅外接模式生效（session.create 传 agentPreset）；内置 bundled 模式无预设通道（官方 SDK 协议无此参数），此字段保留。"
         },
         "reasoningEffort": {
           "type": "string",
           "enum": ["off", "high", "max"],
           "default": "high",
           "title": "推理强度",
-          "description": "内置 headless 模式暂未透传推理强度（用 DSH profile 默认值），保留字段。"
+          "description": "保留字段（官方 SDK runtime 配置的推理强度由 bundled/cordis.yml 官方模板决定）。"
         },
         "toolsMode": {
           "type": "string",
           "enum": ["native", "code", "both"],
           "default": "native",
-          "title": "工具呈现模式（内置 headless 模式）",
-          "description": "headless 进程的 DSH_TOOLS_MODE：native=原生工具 schema；code=单一 run_code 入口（Code Mode）；both=两者都发给模型。与 web 界面的临时 Code Mode 开关一致。"
+          "title": "工具呈现模式（内置 bundled 模式）",
+          "description": "保留字段（官方 SDK runtime 的工具集由 bundled/cordis.yml 官方模板决定）。"
         },
         "permissionMode": {
           "type": "string",
           "enum": ["workspace-write", "danger-full-access", "read-only"],
           "default": "workspace-write",
-          "title": "沙箱权限模式（内置 headless 模式）",
-          "description": "headless 进程的 DSH_PERMISSION_MODE：workspace-write=只允许写工作区（越界操作 fail closed）；danger-full-access=全程不审批（带授权重派用，慎用）；read-only=只读。单次派单可用 dsh_run 的 permission 参数覆盖。"
-        },
-        "dshInstallDir": {
-          "type": "string",
-          "default": "",
-          "title": "本机 DeepSeek Harness 安装根目录（内置 headless 模式）",
-          "description": "插件复用该目录下的 node_modules（离线依赖部署，junction 链接）。留空自动探测 D:\\DeepSeek-Harness 与 ~/.dsh；都找不到时报错提示先安装 DSH。"
+          "title": "沙箱权限模式（内置 bundled 模式）",
+          "description": "官方 SDK runtime 的 DSH_PERMISSION_MODE：workspace-write=只允许写工作区（越界操作 fail closed）；danger-full-access=全程不审批（带授权重派用，慎用）；read-only=只读。单次派单可用 dsh_run 的 permission 参数覆盖。"
         }
       }
     }

@@ -1,10 +1,10 @@
 // dsh-diagnose.js —— 自愈诊断工具（dsh_diagnose，只读）
 // 体检四检（对齐 DSHana 就位校验链精神 + 运行级验证原则「能跑才算好」，杜绝「文件存在 = 就绪」的假就绪）：
 //   t1 Node.js：配置存在性 + 真跑 node --version + npm-cli.js 存在性；未配置时给出本机候选列表
-//   t2 依赖：cliBin（@deepseek-ai/dsh/lib/bin.js）存在性 + 真跑 node cliBin --version，
+//   t2 依赖：bundled 官方 SDK runtime 就位（cordis.yml + runtime bin + SDK client）+ 真跑 node import(client)，
 //            沿依赖图加载，专门抓 ERR_MODULE_NOT_FOUND 类「假就绪」
-//   t3 连接：external 对 3080 做健康检查；embedded 输出就位校验结果
-//   t4 上次退出记录：dataDir/last-exit.json（headless 进程每次终态落盘，重启后可查）
+//   t3 连接：external 对 3080 做健康检查；bundled 输出就位校验结果
+//   t4 上次退出记录：dataDir/last-exit.json（SDK runtime 进程每次终态落盘，重启后可查）
 // 门禁链：t1 不过 → t2/t3 结果标注「不可信」；每项检查给人话修复指引（坏在哪/为什么坏/怎么修）
 // 降级链：单项检查失败记 {ok:false, error} 不抛；整体读取失败静默降级；只读工具
 //         （sessionPermission readOnly），不建立连接、不拉起任何服务、不写任何文件。
@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { DshClient } from '../lib/client.js';
 import { manifestDefault } from '../lib/manifest-defaults.js';
@@ -21,9 +22,9 @@ export const name = 'dsh_diagnose';
 export const description =
   'dsh 连接自愈体检（只读，无副作用）：四项检查定位「连不上 DSH」到底坏在哪一环——' +
   '① Node.js（真跑 node --version 验证 + npm-cli.js 存在性，未配置时给出本机候选列表）；' +
-  '② 依赖（真跑 node <dsh cliBin> --version，沿依赖图加载，抓 ERR_MODULE_NOT_FOUND 类假就绪）；' +
-  '③ 连接（external 对 3080 健康检查 / embedded 就位校验结果）；' +
-  '④ 上次退出记录（headless 进程上次退出码/时间/stderr 尾部，重启后可查）。' +
+  '② 依赖（bundled 官方 SDK runtime 就位核查 + 真跑 node 装载 SDK client，抓 ERR_MODULE_NOT_FOUND 类假就绪）；' +
+  '③ 连接（external 对 3080 健康检查 / bundled 就位校验结果）；' +
+  '④ 上次退出记录（SDK runtime 进程上次退出码/时间/stderr 尾部，重启后可查）。' +
   '每项附人话修复指引（坏在哪/为什么坏/怎么修）；t1 不过时 t2/t3 结果标注不可信。' +
   '不建立连接、不拉起服务，纯只读。';
 
@@ -230,37 +231,41 @@ function checkT1(cfg) {
   };
 }
 
-// ---- t2：依赖（cliBin 存在性 + 运行级验证，抓 ERR_MODULE_NOT_FOUND 假就绪）----
+// ---- t2：依赖（bundled 官方 SDK runtime 就位核查 + SDK client 装载验证，抓 ERR_MODULE_NOT_FOUND 假就绪）----
 
-/** cliBin 候选链（对齐 headless._resolveBinJs：junction → 配置 dshInstallDir → 常见安装位置） */
-function cliBinCandidates(cfg, s) {
+/** bundled 配置项目候选（插件数据目录 bundled/：cordis.yml + 官方 npm 安装的 node_modules） */
+function bundledCandidates(cfg, s) {
   const list = [];
-  const push = (p) => {
-    if (p && typeof p === 'string' && p.trim() && !list.includes(p)) list.push(p.trim());
-  };
   if (s.dataDir) {
-    push(path.join(s.dataDir, 'dsh-node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'));
+    const dir = path.join(s.dataDir, 'bundled');
+    list.push({
+      dir,
+      cordis: path.join(dir, 'cordis.yml'),
+      binJs: path.join(dir, 'node_modules', '@deepseek-ai', 'dsh-sdk-jsonrpc-demo', 'lib', 'bin.js'),
+      clientEntry: path.join(dir, 'node_modules', '@deepseek-ai', 'dsh-sdk-client', 'lib', 'index.js'),
+    });
   }
-  const cfgRoot = cfg.dshInstallDir;
-  if (cfgRoot) push(path.join(cfgRoot, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'));
-  push(path.join('D:\\DeepSeek-Harness', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'));
-  push(path.join(os.homedir(), '.dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'));
   return list;
 }
 
-/** 真跑 node <cliBin> --version（30s 超时）；专门识别 ERR_MODULE_NOT_FOUND 类「假就绪」 */
-function runCliBin(nodePath, cliBin) {
+/** 运行级验证：node -e import(官方 SDK client)（20s 超时）；专门识别 ERR_MODULE_NOT_FOUND 类「假就绪」 */
+function runClientImport(nodePath, clientEntry) {
   try {
-    const r = spawnSync(nodePath, [cliBin, '--version'], {
-      encoding: 'utf8',
-      timeout: 30000,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const spec = JSON.stringify(pathToFileURL(clientEntry).href);
+    const r = spawnSync(
+      nodePath,
+      ['--input-type=module', '-e', `import(${spec}).then(m => console.log(typeof m.DeepSeekHarness))`],
+      {
+        encoding: 'utf8',
+        timeout: 20000,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }
+    );
     const stdout = String(r.stdout ?? '').trim();
     const stderr = String(r.stderr ?? '').trim();
-    if (r.status === 0 && stdout) return { ok: true, version: stdout };
-    // 假就绪：文件在但依赖图加载失败（node_modules 不完整/损坏/junction 断链）
+    if (r.status === 0 && /function/.test(stdout)) return { ok: true, detail: stdout };
+    // 假就绪：文件在但依赖图加载失败（node_modules 不完整/损坏）
     const fakeReady = /ERR_MODULE_NOT_FOUND|Cannot find module|ERR_PACKAGE_PATH_NOT_EXPORTED|ERR_REQUIRE_ESM/i.test(stderr);
     return { ok: false, fakeReady, error: stderr.slice(0, 300) || `退出码 ${r.status}` };
   } catch (e) {
@@ -268,63 +273,83 @@ function runCliBin(nodePath, cliBin) {
   }
 }
 
-/** t2 检查：cliBin 存在性 + 运行级验证；依赖 t1 提供的可用 node */
+/** t2 检查：bundled 配置项目存在性 + SDK client 装载验证；依赖 t1 提供的可用 node */
 function checkT2(cfg, s, nodePath) {
-  const candidates = cliBinCandidates(cfg, s);
-  const seen = new Set();
-  for (const cand of candidates) {
-    if (seen.has(cand)) continue;
-    seen.add(cand);
-    let exists = false;
-    try {
-      exists = fs.existsSync(cand);
-    } catch {
-      exists = false;
-    }
-    if (!exists) continue;
-    const run = runCliBin(nodePath, cand);
-    if (run.ok) {
-      return { ok: true, cliBin: cand, version: run.version, source: '运行级验证通过', candidates };
-    }
+  const candidates = bundledCandidates(cfg, s);
+  if (!candidates.length) {
+    return { ok: false, exists: false, error: '插件数据目录未知，无法核查 bundled 依赖', candidates: [] };
+  }
+  const cand = candidates[0];
+  let cordisExists = false;
+  try {
+    cordisExists = fs.existsSync(cand.cordis);
+  } catch {
+    cordisExists = false;
+  }
+  if (!cordisExists) {
     return {
       ok: false,
-      exists: true,
-      cliBin: cand,
-      error: run.error,
-      fakeReady: Boolean(run.fakeReady),
+      exists: false,
+      error: 'bundled 配置缺失（cordis.yml）',
       fix: {
-        where: `dsh cliBin 存在（${cand}）但运行失败`,
-        why: run.fakeReady
-          ? '依赖图加载失败（ERR_MODULE_NOT_FOUND 类）：node_modules 不完整/损坏，或 junction 断链——典型的「文件在但没就绪」'
-          : `启动失败：${run.error}`,
-        how: '重新安装/修复本机 DSH 的 node_modules（如 npm ci），或在插件设置「dshInstallDir」指向完整安装根目录；junction 断链可删除插件数据目录 dsh-node_modules 后重试',
+        where: `${cand.cordis} 不存在`,
+        why: 'bundled/cordis.yml 未随插件同步到数据目录',
+        how: '把插件的 bundled/ 目录（cordis.yml + package.json）复制到插件数据目录下，再执行官方安装命令',
       },
       candidates,
     };
   }
+  let binOk = false;
+  let clientOk = false;
+  try {
+    binOk = fs.existsSync(cand.binJs);
+    clientOk = fs.existsSync(cand.clientEntry);
+  } catch {
+    // 保持 false
+  }
+  if (!binOk || !clientOk) {
+    return {
+      ok: false,
+      exists: false,
+      error: 'bundled 依赖未安装（缺官方 SDK runtime/client）',
+      fix: {
+        where: `${cand.binJs} 或 ${cand.clientEntry} 不存在`,
+        why: '官方 npm 安装未执行或不完整',
+        how: `执行官方安装命令：npm install --prefix "${cand.dir}"`,
+      },
+      candidates,
+    };
+  }
+  const run = runClientImport(nodePath, cand.clientEntry);
+  if (run.ok) {
+    return { ok: true, bundledDir: cand.dir, detail: run.detail, source: '官方 SDK client 装载验证通过', candidates };
+  }
   return {
     ok: false,
-    exists: false,
-    error: '未找到 dsh 依赖（cliBin）',
+    exists: true,
+    error: run.error,
+    fakeReady: Boolean(run.fakeReady),
     fix: {
-      where: 'dsh cliBin 不存在（已探测：' + (candidates.slice(0, 2).join('、') || '无候选') + '）',
-      why: '本机未安装 DeepSeek Harness，或安装位置不在探测链内',
-      how: '安装 DeepSeek Harness（https://github.com/deepseek-ai/deepseek-harness），或在插件设置「dshInstallDir」填写安装根目录',
+      where: `bundled 依赖存在但装载失败（${cand.clientEntry}）`,
+      why: run.fakeReady
+        ? '依赖图加载失败（ERR_MODULE_NOT_FOUND 类）：node_modules 不完整/损坏——典型的「文件在但没就绪」'
+        : `装载失败：${run.error}`,
+      how: `重新执行官方安装命令：npm install --prefix "${cand.dir}"`,
     },
     candidates,
   };
 }
 
-// ---- t3：连接（external 健康检查 / embedded 就位校验结果）----
+// ---- t3：连接（external 健康检查 / bundled 就位校验结果）----
 
 async function checkT3(cfg) {
   const mode = cfg.mode || manifestDefault('mode') || 'auto';
-  if (mode === 'embedded') {
-    // embedded 无端口无连接：就位校验（node/bin/key 解析）由 t1/t2 与首次派单覆盖
+  if (mode === 'bundled' || mode === 'embedded') {
+    // bundled 无端口无连接：就位校验（node/bundled/key 解析）由 t1/t2 与首次派单覆盖
     return {
-      mode: 'embedded',
+      mode: 'bundled',
       ok: null,
-      note: '内置模式无端口无连接：Node/dsh 依赖见 t1/t2；apiKey 由 dsh_run 首次派单时校验',
+      note: '内置模式无端口无连接：Node/bundled 依赖见 t1/t2；apiKey 由 dsh_run 首次派单时校验',
     };
   }
   const port = Number(cfg.externalPort || cfg.webPort || manifestDefault('webPort'));
@@ -341,12 +366,12 @@ async function checkT3(cfg) {
       : {
           where: `DSH 服务 127.0.0.1:${port} 不可达`,
           why: '服务未启动、端口被占用、或监听地址不是 127.0.0.1',
-          how: `启动您的 DSH（浏览器打开 http://127.0.0.1:${port} 验证）；不想跑服务可把 mode 改为 embedded（需 apiKey）`,
+          how: `启动您的 DSH（浏览器打开 http://127.0.0.1:${port} 验证）；不想跑服务可把 mode 改为 bundled（需 apiKey 与官方 npm 安装）`,
         },
   };
 }
 
-// ---- t4：上次退出记录（dataDir/last-exit.json，headless 进程每次终态落盘）----
+// ---- t4：上次退出记录（dataDir/last-exit.json，SDK runtime 进程每次终态落盘）----
 
 function checkT4(s) {
   if (!s.dataDir) {
@@ -355,11 +380,11 @@ function checkT4(s) {
   try {
     const file = path.join(s.dataDir, 'last-exit.json');
     if (!fs.existsSync(file)) {
-      return { ok: true, exists: false, note: '无上次退出记录（首次诊断或从未有 headless 进程退出）' };
+      return { ok: true, exists: false, note: '无上次退出记录（首次诊断或从未有内置任务退出）' };
     }
     return { ok: true, exists: true, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
   } catch {
-    return { ok: false, error: 'last-exit.json 读取失败（文件损坏），可删除后由下次 headless 任务重建' };
+    return { ok: false, error: 'last-exit.json 读取失败（文件损坏），可删除后由下次内置任务重建' };
   }
 }
 
@@ -378,9 +403,9 @@ async function diagnose(ctx) {
     ? checkT2(cfg, s, t1.nodePath)
     : {
         ok: false,
-        note: '无可用 Node（t1 未通过），无法做依赖运行级验证',
+        note: '无可用 Node（t1 未通过），无法做依赖装载验证',
         trusted: false,
-        candidates: cliBinCandidates(cfg, s),
+        candidates: bundledCandidates(cfg, s),
       };
 
   // t3：独立健康检查（信息仍有用），门禁链标注可信度
@@ -411,7 +436,7 @@ async function diagnose(ctx) {
   } else if (t1.error) {
     lines.push(`   ${t1.error}`);
   }
-  lines.push(`② 依赖（dsh cliBin）：${t2.ok ? `✅ 就绪（${t2.cliBin}，${t2.version}；运行级验证通过）` : `❌ ${t2.note || (t2.fakeReady ? '依赖不完整（假就绪：运行级验证失败）' : '不可用')}`}${t2.trusted === false ? '（不可信：t1 未通过）' : ''}`);
+  lines.push(`② 依赖（bundled SDK runtime）：${t2.ok ? `✅ 就绪（${t2.bundledDir}；官方 SDK client 装载验证通过）` : `❌ ${t2.note || (t2.fakeReady ? '依赖不完整（假就绪：装载验证失败）' : '不可用')}`}${t2.trusted === false ? '（不可信：t1 未通过）' : ''}`);
   if (!t2.ok && t2.fix) {
     lines.push(`   坏在哪：${t2.fix.where}`);
     lines.push(`   为什么坏：${t2.fix.why}`);
@@ -427,7 +452,7 @@ async function diagnose(ctx) {
   } else if (t3.error) {
     lines.push(`   ${t3.error}`);
   }
-  lines.push(`④ 上次退出记录：${t4.exists ? `✅ ${t4.mode === 'embedded' ? '内置进程' : '记录'} ${t4.endedAt ?? '时间未知'}，exit=${t4.exitCode ?? '-'}${t4.stderrTail ? `，stderr 尾部：${String(t4.stderrTail).slice(0, 120)}` : ''}` : t4.note || `❌ ${t4.error || '读取失败'}`}`);
+  lines.push(`④ 上次退出记录：${t4.exists ? `✅ ${t4.mode === 'bundled' ? '内置进程' : '记录'} ${t4.endedAt ?? '时间未知'}，exit=${t4.exitCode ?? '-'}${t4.stderrTail ? `，stderr 尾部：${String(t4.stderrTail).slice(0, 120)}` : ''}` : t4.note || `❌ ${t4.error || '读取失败'}`}`);
   if (t4.ok === false && t4.error) {
     lines.push(`   怎么修：${t4.error}`);
   }
@@ -449,11 +474,11 @@ async function diagnose(ctx) {
           trusted: t2.trusted !== false,
           note: t2.note ?? null,
           exists: t2.exists ?? null,
-          cliBin: t2.cliBin ?? null,
-          version: t2.version ?? null,
+          bundledDir: t2.bundledDir ?? null,
+          detail: t2.detail ?? null,
           error: t2.error ?? null,
           fakeReady: t2.fakeReady ?? null,
-          candidates: t2.candidates ?? [],
+          candidates: (t2.candidates ?? []).map((c) => c.dir ?? c),
         },
         t3: {
           ok: t3.ok,

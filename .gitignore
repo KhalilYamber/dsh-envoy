@@ -4,8 +4,8 @@
 # 鎵撳寘浜х墿锛堜粎淇濈暀鏈€鏂板彂甯冨寘锛屽巻鍙插寘涓嶆彁浜わ級
 dist/*.zip
 dist/*.sha256
-!dist/dsh-bridge-1.1.0.zip
-!dist/dsh-bridge-1.1.0.zip.sha256
+!dist/dsh-bridge-2.0.0.zip
+!dist/dsh-bridge-2.0.0.zip.sha256
 
 # 鏈満澶囦唤涓庡唴閮ㄨ祫鏂?backup/
 research/

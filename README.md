@@ -39,7 +39,7 @@ Hana ：正在派单【0815-01】…（external 模式）
 
 ## 安装（手动解压，已验证）
 
-1. 从 [Releases 页面](https://github.com/KhalilYamber/dsh-envoy/releases) 下载最新版 zip（如 `dsh-bridge-1.1.0.zip`，具体版本号以 Releases 页面为准；或直接用仓库 `dist/` 目录里的同名文件）
+1. 从 [Releases 页面](https://github.com/KhalilYamber/dsh-envoy/releases) 下载最新版 zip（如 `dsh-bridge-2.0.0.zip`，具体版本号以 Releases 页面为准；或直接用仓库 `dist/` 目录里的同名文件）
 2. 解压到 Hana 的插件目录，目录名必须是 `dsh-bridge`：
    - Windows：`C:\Users\<您的用户名>\.hanako\plugins\dsh-bridge`
    - macOS / Linux：`~/.hanako/plugins/dsh-bridge`
@@ -47,9 +47,9 @@ Hana ：正在派单【0815-01】…（external 模式）
 
 > 若您的 Hana 版本有插件管理界面，也可尝试从界面导入（各版本能力不同，以手动解压为准）。
 
-## 更新（从旧版升级，v0.2.x / v1.0.x → v1.1.0）
+## 更新（从旧版升级，v0.2.x / v1.0.x → v2.0.0）
 
-v1.1.0 是薄桥 2.0 重构版：内置模式从旧「自拉 headless 进程」换成「官方 SDK runtime」。任务记录、会话路由、标签等数据格式未变，升级后自动延续；内置模式的官方 npm 安装是唯一的新步骤。以下步骤可交给 Agent 执行（路径中的 `<用户名>`、`<数据目录>` 按实际替换）：
+v2.0.0 是薄桥 2.0 重构版（主版本升级）：内置模式从旧「自拉 headless 进程」换成「官方 SDK runtime」。任务记录、会话路由、标签等数据格式未变，升级后自动延续；内置模式的官方 npm 安装是唯一的新步骤。以下步骤可交给 Agent 执行（路径中的 `<用户名>`、`<数据目录>` 按实际替换）：
 
 1. **备份插件数据目录**（保险，可选）：任务记录与会话路由升级后会自动读取，备份仅作兜底。
    ```powershell

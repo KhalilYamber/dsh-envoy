@@ -21,7 +21,7 @@ export const name = 'dsh_run';
 
 export const description =
   '把任务交给 DeepSeek Harness（dsh）执行：dsh 是完整编码 agent（官方 API、沙箱 bash 与文件系统工具、上下文压缩、subagent 级联），' +
-  '任务文本作为用户消息发给 dsh agent，cwd 是其沙箱工作目录（缺省用插件配置 defaultCwd）。' +
+  '任务文本作为用户消息发给 dsh agent，cwd 是其沙箱工作目录，外接模式下同时是会话延续的钥匙（建议传本任务所属的工程目录）。' +
   '默认异步：立即返回「已派单」，任务完成后宿主经后台消息自动唤醒、结果送达；传 wait=true 同步等待最终结果（长任务会阻塞当前回合）。' +
   '内置（bundled）模式：官方 SDK runtime，无审批通道，越界操作被沙箱立即拒绝（fail closed），agent 在任务报告里说明；可带授权重派（permission=danger-full-access）。' +
   '外接模式：agent 请求越界权限时任务挂起，插件经 deferred 通道发审批通知（带 opId/approvalId/理由/参数原文），用 dsh_approve 应答；' +
@@ -40,7 +40,7 @@ export const parameters = {
     },
     cwd: {
       type: 'string',
-      description: 'dsh agent 的沙箱工作目录（绝对路径）。缺省用插件配置 defaultCwd；resume（传 sessionId）时该值被忽略',
+      description: 'dsh agent 的沙箱工作目录（绝对路径）。外接模式的会话延续钥匙：传本任务所属的工程目录，同工程任务复用同一会话；不传则每次新建，返回文本会提示未参与延续。内置模式不传时回落配置 defaultCwd / 数据目录；resume（传 sessionId）时被忽略',
     },
     timeout: {
       type: 'number',
@@ -267,8 +267,9 @@ async function run(ctx) {
   const task = String(ctx?.task ?? '').trim();
   if (!task) throw new Error('task 不能为空：请给出要 dsh 执行的任务书文本');
   const sidParam = String(ctx?.sessionId ?? '').trim() || null;
-  // 【作者后续开发】defaultCwd 功能未开发完成，暂禁用：不读取配置值，cwd 只认显式传参；
-  // 未显式传 cwd 时任务落在 DSH 默认工作区（外接模式为「未分组」）。
+  // 【作者后续开发】defaultCwd 对外接会话路由未启用：外接路径不读取该配置，cwd 只认显式传参
+  //（内置路径仍以 defaultCwd 作沙箱 cwd 兜底，见 lib/sdk-leg.js）。
+  // 未显式传 cwd 时：不参与会话路由；会话落在外接偏好工作区（标题含「协助Hana」，无则 DSH 默认）。
   const cwd = String(ctx?.cwd ?? '').trim() || '';
   const policyRaw = String(ctx?.sessionPolicy ?? '').trim();
   const policy = policyRaw ? policyRaw : 'auto';
@@ -304,7 +305,7 @@ async function run(ctx) {
     }
     // P1-2.2：apiKey 未配在 spawn 前就拦下，给指定话术（不等到进程跑起来报 MISSING_CREDENTIAL）
     if (/apiKey|DEEPSEEK_API_KEY/.test(msg)) {
-      throw new Error('内置模式需要 apiKey。请到 Hana 的插件设置（DSH Envoy）填写 DeepSeek API Key 后再派单。');
+      throw new Error('内置模式需要 apiKey。请到 Hana 的插件设置（DSH Envoy）填写模型服务的 API Key 后再派单。');
     }
     throw new Error(`DSH 内置（bundled）就绪失败：${msg}`);
   }
@@ -426,7 +427,7 @@ async function run(ctx) {
   // 优先级：显式 sessionId > sessionPolicy（auto/new）；无 cwd 时路由不生效（按现状新建）
   const routes = sessionRoutes(s);
   let routeCwd = null; // 参与路由的 cwd（null = 不查表不写表）
-  let routeAction = null; // 人话：reuse / create / new-with-handoff / new-no-old / reuse-failed-recreated / explicit / ignored
+  let routeAction = null; // 人话：reuse / create / new-with-handoff / new-no-old / reuse-failed-recreated / explicit / no-cwd / ignored
   let resumeSid = sidParam; // 实际传给 runner 的 sessionId（auto 命中时从路由表取）
   let effectiveTask = task; // new 模式带交接前缀的任务书
 
@@ -453,6 +454,9 @@ async function run(ctx) {
         }
       }
       routeCwd = cwd;
+    } else {
+      // 外接 + 未传 cwd：路由不生效。不静默，如实提示（会话延续的钥匙是 cwd）
+      routeAction = 'no-cwd';
     }
   } else {
     routeAction = 'ignored'; // 内置模式无会话延续
@@ -579,21 +583,30 @@ async function run(ctx) {
   }
   await settle(final);
   const conclusion = String(final?.conclusion ?? '');
-  const head = conclusion ? conclusion.slice(0, 4000) : '（dsh 未返回文本）';
+  const tagOut = final?.tag ?? tag ?? '??';
+  const head0 = conclusion ? conclusion.slice(0, 4000) : '（dsh 未返回文本）';
+  // DSH 会把任务书开头的【标签】回显进结论，去掉它，免得与下面插件自己的前缀撞成【tag】【tag】
+  const head = head0.startsWith(`【${tagOut}】`) ? head0.slice(tagOut.length + 2) : head0;
   const statusLine =
     final?.status === 'completed'
       ? ''
-      : `\n[status: ${final?.status}${final?.stopReason ? `, stopReason: ${final.stopReason}` : ''}]`;
+      : `\n[status: ${final?.status}${final?.stopReason ? `, stopReason: ${final.stopReason}` : ''}]` +
+        (final?.error ? `\n错误：${String(final.error).slice(0, 300)}` : '');
   const syncNote =
     mode === 'bundled'
       ? '' // bundled 无审批，同步模式无「审批挂死」问题（实测：越界立即 fail closed）
       : `\n（同步模式无审批通知：任务若中途挂起审批，只能等超时自动拒绝或在 dsh Web UI 处理）`;
+  // 同步路径只有文本能到 Agent 手上（details 走宿主通道，Agent 看不见），故把用量/会话压成一行附在文本尾
+  const u = final?.usage ?? null;
+  const usageLine = u
+    ? `\n用量：输入 ${u.input ?? '—'} · 输出 ${u.output ?? '—'} · 缓存 ${u.cache ?? '—'} · 耗时 ${Math.round((Number(final?.durationMs) || 0) / 100) / 10}s · 会话 ${String(final?.sessionId ?? resumeSid ?? '—').slice(0, 12)}…`
+    : '';
   return {
     content: [
       {
         type: 'text',
         text:
-          `【${final?.tag ?? tag ?? '??'}】${head}${statusLine}${syncNote}` +
+          `【${tagOut}】${head}${statusLine}${syncNote}${usageLine}` +
           `\n${modeLine}` +
           `${routeActionText(routeAction, final?.sessionId ?? resumeSid)}`,
       },
@@ -770,6 +783,8 @@ function routeActionText(action, sid) {
       return '，已开新会话（无旧会话可交接）';
     case 'reuse-failed-recreated':
       return '，旧会话已失效，自动新建并登记新会话';
+    case 'no-cwd':
+      return '，本次未参与会话延续（未提供工作目录 cwd）';
     case 'explicit':
     case 'ignored':
     default:

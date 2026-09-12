@@ -15,8 +15,10 @@ cwd = 项目根）。单个测试失败不中断，继续跑后面的测试，�
   1. research/test-labels.mjs          标签计数器（无需 DSH）
   2. research/smoke-routes.mjs         路由表（无需 DSH）
   3. research/test-diagnose.mjs        诊断四检 + manifest 单一事实源（无需 DSH）
-  4. research/test-task-log.mjs        任务记录落盘（需本机 DSH 在跑）
-  5. research/test-task-log-extra.mjs  并发/终态补充（需本机 DSH 在跑）
+  4. research/smoke-contract.mjs       外接契约三层（认证/端点/流，只读；需本机 DSH 在跑）
+  5. research/smoke-session-policy.mjs 会话延续（同 cwd 复用 / new 交接 / 显式 resume；5 单真实派单，需本机 DSH）
+  6. research/test-task-log.mjs        任务记录落盘（需本机 DSH 在跑）
+  7. research/test-task-log-extra.mjs  并发/终态补充（需本机 DSH 在跑）
 #>
 param(
     [switch]$SkipDsh
@@ -41,6 +43,8 @@ $Tests = @(
     @{ Name = 'test-labels（标签计数器）';         File = 'research\test-labels.mjs';         NeedsDsh = $false },
     @{ Name = 'smoke-routes（路由表）';            File = 'research\smoke-routes.mjs';        NeedsDsh = $false },
     @{ Name = 'test-diagnose（诊断四检+B1）';      File = 'research\test-diagnose.mjs';       NeedsDsh = $false },
+    @{ Name = 'smoke-contract（外接契约三层）';     File = 'research\smoke-contract.mjs';      NeedsDsh = $true },
+    @{ Name = 'smoke-session-policy（会话延续）';   File = 'research\smoke-session-policy.mjs'; NeedsDsh = $true },
     @{ Name = 'test-task-log（任务记录落盘）';     File = 'research\test-task-log.mjs';       NeedsDsh = $true },
     @{ Name = 'test-task-log-extra（并发/终态）';  File = 'research\test-task-log-extra.mjs'; NeedsDsh = $true }
 )

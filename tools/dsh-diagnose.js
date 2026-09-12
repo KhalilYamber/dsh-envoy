@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { DshClient } from '../lib/client.js';
+import { makeExternalClient } from '../lib/external.js';
 import { manifestDefault } from '../lib/manifest-defaults.js';
 
 export const name = 'dsh_diagnose';
@@ -342,7 +342,7 @@ function checkT2(cfg, s, nodePath) {
 
 // ---- t3：连接（external 健康检查 / bundled 就位校验结果）----
 
-async function checkT3(cfg) {
+async function checkT3(cfg, dataDir, logger) {
   const mode = cfg.mode || manifestDefault('mode') || 'auto';
   if (mode === 'bundled' || mode === 'embedded') {
     // bundled 无端口无连接：就位校验（node/bundled/key 解析）由 t1/t2 与首次派单覆盖
@@ -353,21 +353,27 @@ async function checkT3(cfg) {
     };
   }
   const port = Number(cfg.externalPort || cfg.webPort || manifestDefault('webPort'));
-  const healthy = await new DshClient(`http://127.0.0.1:${port}`)
-    .health()
-    .then(() => true)
-    .catch(() => false);
+  const client = makeExternalClient(cfg, dataDir, logger);
+  const reachable = await client.reachable();
+  const healthy = reachable ? await client.health().then(() => true).catch(() => false) : false;
   return {
     mode: mode === 'external' ? 'external' : 'auto（探测 external）',
     port,
+    reachable,
     ok: healthy,
     fix: healthy
       ? null
-      : {
-          where: `DSH 服务 127.0.0.1:${port} 不可达`,
-          why: '服务未启动、端口被占用、或监听地址不是 127.0.0.1',
-          how: `启动您的 DSH（浏览器打开 http://127.0.0.1:${port} 验证）；不想跑服务可把 mode 改为 bundled（需 apiKey 与官方 npm 安装）`,
-        },
+      : reachable
+        ? {
+            where: `DSH 服务 127.0.0.1:${port} 在跑，但访问凭据不可用`,
+            why: 'DSH 0.1.2+ 的 Web 服务要求浏览器 cookie；插件需用当前启动的 token 换一次（cookie 有效期约 30 天，跨重启有效）',
+            how: `确认「DSH 启动日志路径」指向 dsh web 的输出日志（默认 D:/DeepSeek-Harness/dsh-web.out.log），或把日志里 ?token=... 那串手工粘进「外部 DSH 访问 token」；token 每次 DSH 启动都会更换`,
+          }
+        : {
+            where: `DSH 服务 127.0.0.1:${port} 不可达`,
+            why: '服务未启动、端口被占用、或监听地址不是 127.0.0.1',
+            how: `启动您的 DSH（浏览器打开 http://127.0.0.1:${port} 验证）；不想跑服务可把 mode 改为 bundled（需 apiKey 与官方 npm 安装）`,
+          },
   };
 }
 
@@ -411,7 +417,7 @@ async function diagnose(ctx) {
   // t3：独立健康检查（信息仍有用），门禁链标注可信度
   let t3;
   try {
-    t3 = await checkT3(cfg);
+    t3 = await checkT3(cfg, s?.dataDir, ctx?.log);
   } catch (e) {
     t3 = { ok: false, error: e?.message || String(e) }; // 降级：连接检查失败不抛
   }

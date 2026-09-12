@@ -9,14 +9,14 @@ Hana 与 DeepSeek Harness（DSH）之间的交接层：Hana 把任务书外包�
 
 ## 双模式速记
 
-- **external（外接）**：直连用户自跑的 DSH（默认 127.0.0.1:3080）。越界操作**挂起等审批**，可经 dsh_approve 应答或用户在 DSH 界面处理；无人应答 `approvalTimeoutMs`（默认 180s）自动拒绝。
+- **external（外接）**：直连用户自跑的 DSH（默认 127.0.0.1:3080）。越界操作先被沙箱**硬拒**（fail closed，报错附 `escalation available`）；只有 agent 主动带 `sandbox_permissions: danger-full-access` 原样重试，才会**挂起等审批**，可经 dsh_approve 应答或用户在 DSH 界面处理；无人应答 `approvalTimeoutMs`（默认 180s）自动拒绝。**越界本身不弹审批**。
 - **bundled（内置）**：官方 SDK runtime（官方 npm 安装于插件数据目录 bundled/），无界面无审批——越界**立即被拒**（fail closed），agent 在报告里说明。想放行越界只能带授权重派（`permission=danger-full-access`）。
 - **auto（默认）**：探测到外部服务走外接，否则内置。切换无需重启，对新任务生效。
 - **双腿能力不对称（官方协议边界）**：agentPreset、sessionId 续跑、审批仅外接可用；内置无预设通道、每任务独立进程（进程亡即弃会话）。
 
 ## 工具速查
 
-- `dsh_run(task, cwd?, timeout?, wait?, sessionId?, sessionPolicy?, agentPreset?, permission?)`：派活。默认异步（完成后宿主唤醒），`wait=true` 同步等结果。`sessionId`/`sessionPolicy`/`agentPreset` 仅外接（resume/路由/预设）；`permission` 仅内置。
+- `dsh_run(task, cwd?, timeout?, wait?, sessionId?, sessionPolicy?, agentPreset?, permission?)`：派活。默认异步（完成后宿主唤醒），`wait=true` 同步等结果。`sessionId`/`sessionPolicy`/`agentPreset` 仅外接（resume/路由/预设）；`permission` 仅内置。外接派单请传 `cwd`＝**本任务所属的工程目录**（会话延续的钥匙，缺了会另开会话）。
 - `dsh_status(sessionId?)`：查进度与任务记录（文本展示 20 条、details 全量 50 条）、挂起审批、会话路由表。
 - `dsh_approve(approvalId, outcome?)`：应答审批（`allowed-once` 默认 / `rejected`）；内置模式调用返回说明性提示。
 - `dsh_cancel(sessionId?)`：止损。外接传 sessionId、内置传 opId（省略取消唯一运行中任务）；幂等。
@@ -34,6 +34,7 @@ external 异步派单后**必须**盯梢循环：`exec_command` 等待 15~20 秒
 
 ### 0.5 会话延续（项目级路由，仅外接，派单前想一下）
 
+- **派单必带 `cwd`**：传**本任务所属的工程目录**。它是会话延续的钥匙；缺了则路由整条不生效，每次另开新会话，返回文本会如实提示「本次未参与会话延续」。
 - 默认 `sessionPolicy=auto`：按 cwd 查路由表，同工程有活跃会话自动复用（省 token）；未命中则新建并登记。`new`：强制新建，自动从旧会话提取交接摘要拼进任务书开头（「这是延续会话…请继续」）。显式传 sessionId 优先（不查表不写表）。
 - 何时用 new：DSH 侧上下文太满、旧会话状态混乱、想干净重来（问用户或用户主动说）。
 - `dsh_cancel` 后对应路由自动摘除；`dsh_status` 展示「会话路由表」供判断。bundled 无会话概念，sessionPolicy 不生效。
@@ -177,6 +178,8 @@ deferred 后台结果可能不来（宿主重启等）。用户再次开口问�
 | dsh_diagnose ② 报「依赖不完整（假就绪）」 | bundled node_modules 缺失/损坏：重新执行官方安装命令 `npm install --prefix <插件数据目录>/bundled` |
 | 内置任务「完成」但报告说被拒 | 越界 fail closed。问用户是否带授权重派（permission=danger-full-access） |
 | 外接任务一直 running | dsh_status 看是否有挂起审批；用户可在 DSH 界面处理，或调 dsh_approve；超时自动拒绝（180s） |
+| 外接越界被拒但任务照常 completed | 沙箱硬拒在前、审批在后；agent 未主动申请提权时不会挂审批，属正常，不是故障 |
+| 同工程派单没接上旧会话 | 先看返回文本有没有「本次未参与会话延续」——多半是派单没带 `cwd`＝本任务所属的工程目录；路由表现状用 dsh_status 查 |
 | 任务失败 status=error | 读 conclusion 中的错误信息；stopReason=timeout 说明超时，可调大 timeout 重派 |
 | 改了配置不生效 | 重启 Hana（宿主缓存配置快照） |
 | 标签对不上 | 标签【MMdd-NN】跨天归零属正常 |

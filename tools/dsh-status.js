@@ -8,7 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { DshClient } from '../lib/client.js';
+import { makeExternalClient } from '../lib/external.js';
 import { SessionRoutes } from '../lib/session-routes.js';
 import { loadTaskLog } from '../lib/task-log.js';
 import { manifestDefault } from '../lib/manifest-defaults.js';
@@ -123,8 +123,9 @@ async function status(ctx) {
   if (mode === 'external' || mode === 'auto') {
     // external 探测：轻量 GET /（3s 超时），只读，不起任何服务
     const port = Number(cfg.externalPort || cfg.webPort || manifestDefault('webPort'));
-    const healthy = await new DshClient(`http://127.0.0.1:${port}`)
-      .health()
+    // 0.1.2+ 根地址无凭据回 401：这里只判「服务在不在」，凭据问题留给下面的会话查询报出来
+    const healthy = await makeExternalClient(cfg, s.dataDir, null)
+      .reachable()
       .then(() => true)
       .catch(() => false);
     external = { port, healthy };
@@ -198,7 +199,7 @@ async function status(ctx) {
       } catch {
         client = null;
       }
-      if (!client) client = new DshClient(`http://127.0.0.1:${external.port}`);
+      if (!client) client = makeExternalClient(cfg, s.dataDir, null); // 外接可达时直连对账
       const raw = await client.listSessions();
       const items = Array.isArray(raw) ? raw : (raw?.items ?? []);
       // 按 updatedAt 倒序取最近 10 个（schema：{items:[{sessionId, updatedAt, running, blank, cwd, …}]}）
@@ -221,7 +222,7 @@ async function status(ctx) {
         if (it?.running !== true) continue; // 仅活动会话；空闲会话不算「失联任务」
         let state = 'turn 运行中';
         try {
-          // session.history：{events:[{event:{type,seq,time,data},view?}],hasMore}（client 侧 schema 实证）
+          // session/follow 开场快照的 records：[{type:'event', event:{type,seq,time,data}}]
           const events = await client.history(sid);
           let lastStart = -1;
           let lastEnd = -1;
@@ -233,8 +234,8 @@ async function status(ctx) {
             const seq = Number(ev?.seq ?? -1);
             if (t === 'turn/start') lastStart = Math.max(lastStart, seq);
             else if (t === 'turn/end') lastEnd = Math.max(lastEnd, seq);
-            else if (t === 'approval/requested') lastReq = Math.max(lastReq, seq);
-            else if (t === 'approval/resolved') lastRes = Math.max(lastRes, seq);
+            else if (t === 'approval/asked') lastReq = Math.max(lastReq, seq);
+            else if (t === 'approval/decided') lastRes = Math.max(lastRes, seq);
           }
           state = lastReq > lastRes ? '审批挂起' : lastStart > lastEnd ? 'turn 运行中' : '空闲';
         } catch {
@@ -281,7 +282,7 @@ async function status(ctx) {
         client = null;
       }
       if (!client && external?.healthy) {
-        client = new DshClient(`http://127.0.0.1:${external.port}`); // 外接健康时直连查询
+        client = makeExternalClient(cfg, s.dataDir, null); // 外接可达时直连查询（凭据由客户端自行换取）
       }
       if (!client) {
         sessionNote = '当前无可用 DSH 连接（尚未派过单且无外部服务），无法查询会话；先调 dsh_run 派一单即可建立连接';

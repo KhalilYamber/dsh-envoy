@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "dsh-bridge",
   "name": "DSH Envoy",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "DSH Envoy：Hana 与 DeepSeek Harness（DSH）的交接层。薄桥架构：外接直连您自跑的 DSH（配置凭据会话原样保留，审批完整），或内置官方 SDK runtime（官方 npm 安装，无审批通道、越界即拒、可带授权重派）。五个工具：dsh_run 派活（可带 agentPreset）、dsh_status 查进度、dsh_approve 应答审批、dsh_cancel 止损、dsh_diagnose 体检。工作标签【MMdd-NN】分组，外接模式会话可续跑（同工程自动延续）。任务记录落盘（tasks.jsonl），重启后可查历史。",
   "author": "Khalil",
   "minAppVersion": "0.82.0",
@@ -38,14 +38,26 @@
         "apiKey": {
           "type": "string",
           "default": "",
-          "title": "DeepSeek API Key（内置模式）",
-          "description": "内置模式必填，在设置界面填写，Agent 不代填。外接模式不需要（密钥由用户自己的 DSH 管理）。改后重启 Hana 生效。"
+          "title": "模型服务 API Key（内置模式）",
+          "description": "内置模式必填，在设置界面填写，Agent 不代填。按下面的「模型端点」填对应服务的 key（端点留空时就是 DeepSeek 的 key）。外接模式不需要（密钥由用户自己的 DSH 管理）。改后重启 Hana 生效。"
+        },
+        "baseUrl": {
+          "type": "string",
+          "default": "",
+          "title": "模型端点（内置模式，可选）",
+          "description": "内置模式的模型服务地址。留空走默认 https://api.deepseek.com。填任意 OpenAI 兼容网关地址即可换用别家的模型（例如 https://api.example.com/v1）。外接模式不需要。改后重启 Hana 生效。"
+        },
+        "model": {
+          "type": "string",
+          "default": "",
+          "title": "模型 id（内置模式，可选）",
+          "description": "内置模式使用的模型 id。留空默认 deepseek-v4-flash。填您的端点支持的模型 id（原样透传，无需注册）。外接模式不需要。改后重启 Hana 生效。"
         },
         "defaultCwd": {
           "type": "string",
           "default": "",
-          "title": "默认工作目录（功能未开发）",
-          "description": "⚠️ 作者后续开发，功能未完成：本设置已禁用，填写不生效。会话默认落在 DSH 的「未分组」工作区。待会话路由改造（同 cwd 多工程会话）完成后启用。"
+          "title": "默认工作目录（外接未启用）",
+          "description": "⚠️ 外接模式的会话延续以显式 cwd 为准（见 dsh_run）；不传 cwd 的派单不参与会话路由，会话落在外接偏好工作区（标题含「协助Hana」）。内置模式以本值作沙箱目录兜底。"
         },
         "defaultTimeoutMs": {
           "type": "number",
@@ -64,6 +76,18 @@
           "default": 3080,
           "title": "外部 DSH 服务端口",
           "description": "auto 模式探测与 external 模式连接用户自跑 DSH 的端口（127.0.0.1 上）。默认 3080。"
+        },
+        "webToken": {
+          "type": "string",
+          "default": "",
+          "title": "外部 DSH 访问 token（外接模式，可选）",
+          "description": "一般不用填：插件会自动从 DSH 启动日志取最近一次启动打印的 token，并换成有效期约 30 天、跨重启有效的 cookie。只有自动读取失败时才需要手工粘贴 dsh web 输出的 ?token=... 里那串。改后对新任务生效。"
+        },
+        "webLogPath": {
+          "type": "string",
+          "default": "D:\\DeepSeek-Harness\\dsh-web.out.log",
+          "title": "DSH 启动日志路径（外接模式取 token 用）",
+          "description": "外接模式取凭据的锚点：优先读同目录下的 dsh-web.token（由启动脚本写入，格式固定），读不到才解析这份日志里的 ?token=...。默认指向本机启动脚本的输出日志；换过启动方式时改这里。"
         },
         "model": {
           "type": "string",

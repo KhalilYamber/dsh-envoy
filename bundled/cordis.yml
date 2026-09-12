@@ -1,7 +1,9 @@
 # DSH Envoy bundled 腿 SDK runtime 配置（薄桥 2.0）
-# 组成：官方 examples/jsonrpc-agent/cordis.yml 原文（unattended coding agent）
+# 组成：官方 examples/jsonrpc-agent/cordis.yml 原文（unattended coding agent；该示例在 DSH 0.1.5 里已不再随包，本文件是它 0.1.1 线的存本）
 #       + 官方 dsh-base/cordis.patch.yml 的沙箱组合行原文（fail-closed 语义）
-# 保真说明：全部插件与配置行为均为官方本体，本文件仅做官方原文组合，零复刻、零裁剪。
+# 保真说明：全部插件与配置行为均为官方本体，零复刻、零裁剪。
+# 本地增补仅一处：llm-deepseek 的 baseURL 读 DSH_LLM_BASE_URL（缺省仍是官方端点 api.deepseek.com），
+#   目的是让内置腿的模型端点可配（OpenAI 兼容网关），不改任何官方行为。
 # 沙箱语义：DSH_PERMISSION_MODE env 驱动（缺省 workspace-write）：
 #   workspace-write/read-only → 越界被沙箱拒；无审批通道（无 Host/UI/wire 方法）→ fail closed
 #   danger-full-access → approval policy=never，全程放行（带授权重派语义）
@@ -25,6 +27,7 @@
   config:
     thinking: enabled
     reasoningEffort: max
+    baseURL: !!js process.env.DSH_LLM_BASE_URL ?? 'https://api.deepseek.com'
 
 # Managed child-process groups for the shell executor (spawn/kill/output plumbing).
 - id: subprocess

@@ -2,7 +2,7 @@
 // 协议细节以 DSH 官方实现与实测行为为准（DSH 0.1.0-rc.6）。
 // 校验链：approvalId 必填 → 单例 runner 存在（否则报「无运行中的 dsh 任务」）
 //   → respondApproval 内已含完整校验（对齐 TaskRunner 的校验链）：
-//     审批存在 → 状态必须 pending（已应答/已解决拒答）→ POST /api/respond 被接受（accepted:true）
+//     审批存在 → 状态必须 pending（已应答/已解决拒答）→ POST /api/$events/result 被接受
 //   → 应答成功本地置 answered。三类错误（不存在/已应答/应答未接受）信息已是人话，直接抛出。
 // 内置 bundled 模式：无审批可答（越界 fail closed），返回说明性文本，不报错（对齐 v0.2.5 T5 语义）。
 // 返回结构对齐。

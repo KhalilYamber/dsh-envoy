@@ -47,7 +47,18 @@ Hana ：正在派单【0815-01】…（external 模式）
 
 > 若您的 Hana 版本有插件管理界面，也可尝试从界面导入（各版本能力不同，以手动解压为准）。
 
-## 更新（从旧版升级，v0.2.x / v1.0.x → v2.0.0）
+## 更新（从旧版升级）
+
+### 从 2.0.0 升到 2.1.0
+
+- **外接模式**：无需任何操作。
+- **内置模式**：依赖线变了（对齐到官方 `0.1.1-rc.2`）。请**重跑一次官方安装**，不重跑会「假就绪」（`dsh_diagnose` ② 会报，并附同一命令）：
+  ```powershell
+  npm install --prefix "C:\Users\<用户名>\.hanako\plugin-data\dsh-bridge\bundled"
+  ```
+- **新增两格**：`baseUrl`（模型端点，留空走默认 `https://api.deepseek.com`）与 `model`（模型 id，留空走 `deepseek-v4-flash`），可留空不用。
+
+### 从旧版（v0.2.x / v1.0.x）升到 v2.0.0
 
 v2.0.0 是薄桥 2.0 重构版（主版本升级）：内置模式从旧「自拉 headless 进程」换成「官方 SDK runtime」。任务记录、会话路由、标签等数据格式未变，升级后自动延续；内置模式的官方 npm 安装是唯一的新步骤。以下步骤可交给 Agent 执行（路径中的 `<用户名>`、`<数据目录>` 按实际替换）：
 
@@ -84,8 +95,10 @@ v2.0.0 是薄桥 2.0 重构版（主版本升级）：内置模式从旧「自�
 | 配置项 | 何时需要 |
 |---|---|
 | `mode` | 默认 `auto`（探测到 3080 有 DSH 就走外接，否则内置）。想固定走某一种再改 |
-| `apiKey` | **仅内置模式需要**（外接模式凭证由 DSH 自己管理，不填）。填 DeepSeek API Key，只经环境变量传给任务进程，不落盘 |
-| `defaultCwd` | 可留空（功能未开发，暂禁用，填写不生效）。留空时任务落进 DSH 默认工作区（外接模式为「协助Hana」工作区） |
+| `apiKey` | **仅内置模式需要**（外接模式凭证由 DSH 自己管理，不填）。填您模型端点对应的 API Key（端点留空时就是 DeepSeek 的），只经环境变量传给任务进程，不落盘 |
+| `baseUrl` | 仅内置模式。模型服务地址，留空走默认 `https://api.deepseek.com`；填任意 OpenAI 兼容网关即可换用别家模型 |
+| `model` | 仅内置模式。模型 id，留空默认 `deepseek-v4-flash`；填您端点支持的 id（原样透传，无需注册） |
+| `defaultCwd` | 可留空。外接模式的会话延续以显式 cwd 为准；未传 cwd 的派单落进「协助Hana」工作区。内置模式以本值作沙箱目录兜底 |
 | `agentPreset` | 仅外接模式生效：dsh_run 显式传 agentPreset 时透传 session.create（插件不存任何预设定义）；留空不传，尊重您 DSH 的默认预设 |
 | `nodePath` | 可留空。内置模式启动官方 SDK runtime 的 node.exe（留空自动探测） |
 
@@ -151,7 +164,7 @@ LICENSE                  MIT
 
 ## 致谢
 
-本项目开发中借鉴了 Nyasers/dsh-hanako（DSHana）的设计思路：宿主 deferred 通道的调用方式、审批应答的信封结构、任务记录与标签的组织模式。实现为独立重写，未复制或修改其源码文件；传输层采用 DeepSeek Harness 官方 SDK 路线（外接 HTTP 信封 / 内置官方 SDK runtime）。谨此致谢原作者的优秀工作。
+本项目开发中借鉴了 [Nyasers/dsh-hanako](https://github.com/Nyasers/dsh-hanako)（DSHana，MIT License）的设计思路：宿主 deferred 通道的调用方式、审批应答的信封结构、任务记录与标签的组织模式。代码为独立重写，传输层为官方 SDK（外接 HTTP 信封 / 内置官方 SDK runtime），谨此致谢原作者的优秀工作。
 
 ## License
 

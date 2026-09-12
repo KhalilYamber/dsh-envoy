@@ -1,13 +1,15 @@
-﻿# 渚濊禆涓庢湰鏈烘暟鎹?node_modules/
+# 依赖与本机数据
+node_modules/
 *.log
 
-# 鎵撳寘浜х墿锛堜粎淇濈暀鏈€鏂板彂甯冨寘锛屽巻鍙插寘涓嶆彁浜わ級
+# 打包产物（仅保留最新发布包，历史包不提交）
 dist/*.zip
 dist/*.sha256
 !dist/dsh-bridge-2.1.0.zip
 !dist/dsh-bridge-2.1.0.zip.sha256
 
-# 鏈満澶囦唤涓庡唴閮ㄨ祫鏂?backup/
+# 本机备份与内部资料
+backup/
 research/
 release-repo/
 HANDOFF.md
@@ -16,7 +18,6 @@ SPEC-*.md
 FIXLIST-*.md
 design.md
 
-# 绯荤粺鏂囦欢
+# 系统文件
 .DS_Store
 Thumbs.db
-

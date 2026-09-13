@@ -397,7 +397,9 @@ async function status(ctx) {
         v.updatedAt && Number.isFinite(Date.parse(v.updatedAt))
           ? `${Math.max(0, Math.round((Date.now() - Date.parse(v.updatedAt)) / 60000))} 分钟前更新`
           : '更新未知';
-      lines.push(`· ${cwd} → ${String(v.sessionId).slice(0, 12)}…（${ago}）`);
+      // 路由键可能是「目录\u0000工程标记」复合键（NUL 不可见），展示时换成可见分隔（复核 #6）
+      const shownKey = String(cwd).split(String.fromCharCode(0)).join('  ⊙工程：');
+      lines.push(`· ${shownKey} → ${String(v.sessionId).slice(0, 12)}…（${ago}）`);
     }
     lines.push('想开新会话：对 Agent 说「开新会话」即可（sessionPolicy=new，自动带交接摘要）');
   } else {

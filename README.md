@@ -98,7 +98,8 @@ v2.0.0 是薄桥 2.0 重构版（主版本升级）：内置模式从旧「自�
 | `apiKey` | **仅内置模式需要**（外接模式凭证由 DSH 自己管理，不填）。填您模型端点对应的 API Key（端点留空时就是 DeepSeek 的），只经环境变量传给任务进程，不落盘 |
 | `baseUrl` | 仅内置模式。模型服务地址，留空走默认 `https://api.deepseek.com`；填任意 OpenAI 兼容网关即可换用别家模型 |
 | `model` | 仅内置模式。模型 id，留空默认 `deepseek-v4-flash`；填您端点支持的 id（原样透传，无需注册） |
-| `defaultCwd` | 可留空。外接模式的会话延续以显式 cwd 为准；未传 cwd 的派单落进「协助Hana」工作区。内置模式以本值作沙箱目录兜底 |
+| `defaultCwd` | 可留空。外接模式：未显式传 cwd 的派单，会话建在此目录下。内置模式：以本值作沙箱目录兜底 |
+| `externalWorkspace` | 仅外接模式。未传 cwd 且未设 `defaultCwd` 时，优先归入标题含此名称的 DSH 工作区；留空则不特殊寻找 |
 | `agentPreset` | 仅外接模式生效：dsh_run 显式传 agentPreset 时透传 session.create（插件不存任何预设定义）；留空不传，尊重您 DSH 的默认预设 |
 | `nodePath` | 可留空。内置模式启动官方 SDK runtime 的 node.exe（留空自动探测） |
 

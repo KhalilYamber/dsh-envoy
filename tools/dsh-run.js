@@ -40,7 +40,11 @@ export const parameters = {
     },
     cwd: {
       type: 'string',
-      description: 'dsh agent 的沙箱工作目录（绝对路径）。外接模式的会话延续钥匙：传本任务所属的工程目录，同工程任务复用同一会话；不传则每次新建，返回文本会提示未参与延续。内置模式不传时回落配置 defaultCwd / 数据目录；resume（传 sessionId）时被忽略',
+      description: 'dsh agent 的工作目录（绝对路径）。外接模式的会话延续钥匙：传本任务所属的工程目录，同目录任务按工程标记复用同一会话；不传时回落插件设置「派单默认目录」。内置模式不传时同样回落该设置 / 插件数据目录。resume（传 sessionId）时被忽略',
+    },
+    project: {
+      type: 'string',
+      description: '工程标记（外接模式，可选）：同一目录下区分多个工程的会话，例如 hdb-repo、side-chat。传了它，路由按「目录 + 标记」记账，同标记的派单接续同一会话；留空则按目录记账（旧行为）。',
     },
     timeout: {
       type: 'number',
@@ -267,10 +271,11 @@ async function run(ctx) {
   const task = String(ctx?.task ?? '').trim();
   if (!task) throw new Error('task 不能为空：请给出要 dsh 执行的任务书文本');
   const sidParam = String(ctx?.sessionId ?? '').trim() || null;
-  // 【作者后续开发】defaultCwd 对外接会话路由未启用：外接路径不读取该配置，cwd 只认显式传参
-  //（内置路径仍以 defaultCwd 作沙箱 cwd 兜底，见 lib/sdk-leg.js）。
-  // 未显式传 cwd 时：不参与会话路由；会话落在外接偏好工作区（标题含「协助Hana」，无则 DSH 默认）。
-  const cwd = String(ctx?.cwd ?? '').trim() || '';
+  // cwd 兜底链：显式传参 → 插件设置 defaultCwd（0912 起外接模式也读它）→ 空
+  // 空值行为：外接不参与会话路由，会话落「外接偏好工作区」设置指定的工作区（未填则 DSH 默认）；内置落插件数据目录。
+  const cwd = String(ctx?.cwd ?? '').trim() || String(cfg.defaultCwd ?? '').trim();
+  // 工程标记：同一目录下区分多工程会话的路由键（如 hdb-repo / side-chat）；留空 = 沿用按目录记账的旧行为
+  const project = String(ctx?.project ?? '').trim() || null;
   const policyRaw = String(ctx?.sessionPolicy ?? '').trim();
   const policy = policyRaw ? policyRaw : 'auto';
   if (!['auto', 'new'].includes(policy)) {
@@ -358,6 +363,9 @@ async function run(ctx) {
         onApproval: null, // 派单前挂载（需当单的 opId/bus/sessionPath 闭包）
         opLog: ledger(s), // P0-1：审批历史写任务记录（任务结束后可查）
         mode,
+        externalModel: cfg.externalModel, // 外接模式派单模型（插件设置）
+        externalReasoningEffort: cfg.externalReasoningEffort, // 外接模式派单强度（插件设置）
+        externalWorkspace: cfg.externalWorkspace, // 外接偏好工作区名（插件设置）
       });
       s.runner = runner;
     }
@@ -426,7 +434,9 @@ async function run(ctx) {
   // ---- 5.5 会话策略决策（仅 external；bundled 已在上方忽略） ----
   // 优先级：显式 sessionId > sessionPolicy（auto/new）；无 cwd 时路由不生效（按现状新建）
   const routes = sessionRoutes(s);
-  let routeCwd = null; // 参与路由的 cwd（null = 不查表不写表）
+  // 路由键：有工程标记时用「目录 + 标记」（同目录下多工程各记各的会话）；无标记时退化为目录本身（旧行为）
+  const routeKey = cwd ? (project ? `${cwd}\u0000${project}` : cwd) : null;
+  let routeCwd = null; // 参与路由的键（null = 不查表不写表）
   let routeAction = null; // 人话：reuse / create / new-with-handoff / new-no-old / reuse-failed-recreated / explicit / no-cwd / ignored
   let resumeSid = sidParam; // 实际传给 runner 的 sessionId（auto 命中时从路由表取）
   let effectiveTask = task; // new 模式带交接前缀的任务书
@@ -436,7 +446,7 @@ async function run(ctx) {
       routeAction = 'explicit'; // 显式 resume：不查表不写表（现有行为不变）
     } else if (cwd) {
       if (policy === 'new') {
-        const oldSid = routes.get(cwd);
+        const oldSid = routes.get(routeKey);
         if (oldSid) {
           const handoff = await buildHandoff(oldSid, conn.client, ctx?.log); // 10s 超时降级
           effectiveTask = `${handoff}\n\n${task}`;
@@ -445,7 +455,7 @@ async function run(ctx) {
           routeAction = 'new-no-old';
         }
       } else {
-        const hit = routes.get(cwd);
+        const hit = routes.get(routeKey);
         if (hit) {
           resumeSid = hit;
           routeAction = 'reuse';
@@ -453,7 +463,7 @@ async function run(ctx) {
           routeAction = 'create';
         }
       }
-      routeCwd = cwd;
+      routeCwd = routeKey;
     } else {
       // 外接 + 未传 cwd：路由不生效。不静默，如实提示（会话延续的钥匙是 cwd）
       routeAction = 'no-cwd';

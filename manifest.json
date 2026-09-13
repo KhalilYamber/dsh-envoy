@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "dsh-bridge",
   "name": "DSH Envoy",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "DSH Envoy：Hana 与 DeepSeek Harness（DSH）的交接层。薄桥架构：外接直连您自跑的 DSH（配置凭据会话原样保留，审批完整），或内置官方 SDK runtime（官方 npm 安装，无审批通道、越界即拒、可带授权重派）。五个工具：dsh_run 派活（可带 agentPreset）、dsh_status 查进度、dsh_approve 应答审批、dsh_cancel 止损、dsh_diagnose 体检。工作标签【MMdd-NN】分组，外接模式会话可续跑（同工程自动延续）。任务记录落盘（tasks.jsonl），重启后可查历史。",
   "author": "Khalil",
   "minAppVersion": "0.82.0",
@@ -47,17 +47,17 @@
           "title": "模型端点（内置模式，可选）",
           "description": "内置模式的模型服务地址。留空走默认 https://api.deepseek.com。填任意 OpenAI 兼容网关地址即可换用别家的模型（例如 https://api.example.com/v1）。外接模式不需要。改后重启 Hana 生效。"
         },
-        "model": {
-          "type": "string",
-          "default": "",
-          "title": "模型 id（内置模式，可选）",
-          "description": "内置模式使用的模型 id。留空默认 deepseek-v4-flash。填您的端点支持的模型 id（原样透传，无需注册）。外接模式不需要。改后重启 Hana 生效。"
-        },
         "defaultCwd": {
           "type": "string",
           "default": "",
-          "title": "默认工作目录（外接未启用）",
-          "description": "⚠️ 外接模式的会话延续以显式 cwd 为准（见 dsh_run）；不传 cwd 的派单不参与会话路由，会话落在外接偏好工作区（标题含「协助Hana」）。内置模式以本值作沙箱目录兜底。"
+          "title": "派单默认目录（可选）",
+          "description": "外接模式：派单未显式指定 cwd 时，会话就建在这个目录下。内置模式：以本值作沙箱目录兜底。留空 = 外接落下方「外接偏好工作区」（未填则落 DSH 默认工作区），内置落插件数据目录。"
+        },
+        "externalWorkspace": {
+          "type": "string",
+          "default": "",
+          "title": "外接偏好工作区（可选）",
+          "description": "外接模式下，派单未指定目录时优先归入标题含此名称的 DSH 工作区。留空 = 不特殊寻找，落 DSH 的默认工作区。内置模式不需要。"
         },
         "defaultTimeoutMs": {
           "type": "number",
@@ -93,7 +93,20 @@
           "type": "string",
           "default": "deepseek-v4-flash",
           "title": "dsh 模型",
-          "description": "内置 bundled 模式的会话模型（官方 SDK initialize 的 model 路由）。默认：deepseek-v4-flash。"
+          "description": "内置 bundled 模式的会话模型（官方 SDK initialize 的 model 路由）。默认 deepseek-v4-flash；填您的端点支持的模型 id（原样透传，无需注册）。外接模式不需要。改后重启 Hana 生效。"
+        },
+        "externalModel": {
+          "type": "string",
+          "default": "",
+          "title": "派单模型（外接模式，可选）",
+          "description": "外接模式派单时应用的模型 id，例如 deepseek-v4-pro、deepseek-flash。留空 = 不干预，跟随您 DSH 的默认模型。只影响 envoy 派出去的任务，不动您在 DSH 界面手动开的会话。改后对新任务生效。"
+        },
+        "externalReasoningEffort": {
+          "type": "string",
+          "enum": ["default", "off", "low", "high", "max"],
+          "default": "default",
+          "title": "派单思考强度（外接模式，可选）",
+          "description": "外接模式派单时应用的推理强度。default = 不干预，跟随您 DSH 的默认。仅对支持该档位的模型有效；该模型不支持的档位会被 DSH 拒绝并报错。"
         },
         "agentPreset": {
           "type": "string",

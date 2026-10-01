@@ -1,5 +1,5 @@
 // dsh-approve.js —— 审批应答工具（dsh_approve）
-// 协议细节以 DSH 官方实现与实测行为为准（DSH 0.1.0-rc.6）。
+// 协议细节以 DSH 官方实现与实测行为为准（Web 0.1.x 与桌面 0.2.x 均已对活服务实测，最近一次 2026-10-01）。
 // 校验链：approvalId 必填 → 单例 runner 存在（否则报「无运行中的 dsh 任务」）
 //   → respondApproval 内已含完整校验（对齐 TaskRunner 的校验链）：
 //     审批存在 → 状态必须 pending（已应答/已解决拒答）→ POST /api/$events/result 被接受

@@ -3,7 +3,7 @@
 //   t1 Node.js：配置存在性 + 真跑 node --version + npm-cli.js 存在性；未配置时给出本机候选列表
 //   t2 依赖：bundled 官方 SDK runtime 就位（cordis.yml + runtime bin + SDK client）+ 真跑 node import(client)，
 //            沿依赖图加载，专门抓 ERR_MODULE_NOT_FOUND 类「假就绪」
-//   t3 连接：external 对 3080 做健康检查；bundled 输出就位校验结果
+//   t3 连接：external 对候选端口（Web 3080 / 桌面 19387）做健康检查；bundled 输出就位校验结果
 //   t4 上次退出记录：dataDir/last-exit.json（SDK runtime 进程每次终态落盘，重启后可查）
 // 门禁链：t1 不过 → t2/t3 结果标注「不可信」；每项检查给人话修复指引（坏在哪/为什么坏/怎么修）
 // 降级链：单项检查失败记 {ok:false, error} 不抛；整体读取失败静默降级；只读工具
@@ -23,7 +23,7 @@ export const description =
   'dsh 连接自愈体检（只读，无副作用）：四项检查定位「连不上 DSH」到底坏在哪一环——' +
   '① Node.js（真跑 node --version 验证 + npm-cli.js 存在性，未配置时给出本机候选列表）；' +
   '② 依赖（bundled 官方 SDK runtime 就位核查 + 真跑 node 装载 SDK client，抓 ERR_MODULE_NOT_FOUND 类假就绪）；' +
-  '③ 连接（external 对 3080 健康检查 / bundled 就位校验结果）；' +
+  '③ 连接（external 对候选端口做健康检查：Web 3080、桌面 19387 / bundled 就位校验结果）；' +
   '④ 上次退出记录（SDK runtime 进程上次退出码/时间/stderr 尾部，重启后可查）。' +
   '每项附人话修复指引（坏在哪/为什么坏/怎么修）；t1 不过时 t2/t3 结果标注不可信。' +
   '不建立连接、不拉起服务，纯只读。';

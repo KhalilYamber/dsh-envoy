@@ -170,7 +170,8 @@ LICENSE                  MIT
 
 ## 适配与免责
 
-- 适配 DeepSeek Harness `0.1.0-rc.7`（官方 npm @deepseek-ai/* 0.1.0 发布线）。DSH 处于开发者预览期，接口可能有破坏性变更
+- 外接模式：已对 DeepSeek Harness **Web 版 0.1.x 与桌面版 0.2.x 实测通过**（2026-10-01 对活服务逐条核对）。DSH 处于开发者预览期，接口仍可能有破坏性变更
+- 内置模式：对齐官方 npm `@deepseek-ai/*` 0.1.0 发布线（bundled 依赖清单见 `bundled/package.json`）
 - 本仓库不含任何 API Key 或凭据
 - 内置模式的 `danger-full-access` 会解除沙箱边界，仅在您明确授权后使用
 

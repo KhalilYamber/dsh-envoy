@@ -1,5 +1,5 @@
 // dsh-status.js —— 查进度工具（dsh_status，只读）
-// 协议细节以 DSH 官方实现与实测行为为准（DSH 0.1.0-rc.6）。
+// 协议细节以 DSH 官方实现与实测行为为准（Web 0.1.x 与桌面 0.2.x 均已对活服务实测，最近一次 2026-10-01）。
 // 返回：连接模式与健康（external 探测 / bundled SDK runtime 任务进程状态）、运行中任务、
 //       近期任务记录（globalThis.__dshBridge.ops，含审批历史；重启后从 tasks.jsonl 恢复）、挂起审批列表（用 dsh_approve 应答；内置模式恒无）、
 //       DSH 侧对账（P0-1：external 健康时列活动会话，找出「不在本地任务记录」的会话，只呈现事实不自动接管）。

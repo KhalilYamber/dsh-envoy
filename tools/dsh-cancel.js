@@ -1,5 +1,5 @@
 // dsh-cancel.js —— 止损工具（dsh_cancel）
-// 协议细节以 DSH 官方实现与实测行为为准（DSH 0.1.0-rc.6）。
+// 协议细节以 DSH 官方实现与实测行为为准（Web 0.1.x 与桌面 0.2.x 均已对活服务实测，最近一次 2026-10-01）。
 // 流程：取单例 runner（无则「无需取消」）→ 定位目标任务（缺省取消唯一运行任务；
 //       多个在跑时须传 sessionId/opId 指定）→ runner.cancelRequested（abort 联动：
 //       外接任务状态机收到中断后补发 session.cancel，终态 aborted，协议实测 5.3；

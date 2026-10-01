@@ -2,8 +2,8 @@
   "manifestVersion": 1,
   "id": "dsh-bridge",
   "name": "DSH Envoy",
-  "version": "2.2.0",
-  "description": "DSH Envoy：Hana 与 DeepSeek Harness（DSH）的交接层。薄桥架构：外接直连您自跑的 DSH（配置凭据会话原样保留，审批完整），或内置官方 SDK runtime（官方 npm 安装，无审批通道、越界即拒、可带授权重派）。五个工具：dsh_run 派活（可带 agentPreset）、dsh_status 查进度、dsh_approve 应答审批、dsh_cancel 止损、dsh_diagnose 体检。工作标签【MMdd-NN】分组，外接模式会话可续跑（同工程自动延续）。任务记录落盘（tasks.jsonl），重启后可查历史。",
+  "version": "2.3.0",
+  "description": "DSH Envoy：Hana 与 DeepSeek Harness（DSH）的交接层。薄桥架构：外接直连您自跑的 DSH（配置凭据会话原样保留，审批完整；同时支持 Web 版 3080 与桌面版 19387，自动探测、零配置），或内置官方 SDK runtime（官方 npm 安装，无审批通道、越界即拒、可带授权重派）。五个工具：dsh_run 派活（可带 agentPreset）、dsh_status 查进度、dsh_approve 应答审批、dsh_cancel 止损、dsh_diagnose 体检。工作标签【MMdd-NN】分组，外接模式会话可续跑（同工程自动延续）。任务记录落盘（tasks.jsonl），重启后可查历史。",
   "author": "Khalil",
   "minAppVersion": "0.82.0",
   "trust": "full-access",
@@ -75,19 +75,31 @@
           "type": "number",
           "default": 3080,
           "title": "外部 DSH 服务端口",
-          "description": "auto 模式探测与 external 模式连接用户自跑 DSH 的端口（127.0.0.1 上）。默认 3080。"
+          "description": "auto 模式探测与 external 模式连接 DSH 的主端口（127.0.0.1 上）。默认 3080（Web 版 dsh web）。桌面版 DSH 由下方「桌面端 DSH 端口」承担，无需改这里。"
         },
         "webToken": {
           "type": "string",
           "default": "",
           "title": "外部 DSH 访问 token（外接模式，可选）",
-          "description": "一般不用填：插件会自动从 DSH 启动日志取最近一次启动打印的 token，并换成有效期约 30 天、跨重启有效的 cookie。只有自动读取失败时才需要手工粘贴 dsh web 输出的 ?token=... 里那串。改后对新任务生效。"
+          "description": "一般不用填：插件会自动从 DSH 启动日志取最近一次启动打印的 token，并换成有效期约 30 天、跨重启有效的 cookie。只有自动读取失败时才需要手工粘贴 dsh web 输出的 ?token=... 里那串。桌面版 DSH 无 token 可填，留空即可（插件自动改用「DSH 家目录」下的签名密钥）。改后对新任务生效。"
         },
         "webLogPath": {
           "type": "string",
           "default": "D:\\DeepSeek-Harness\\dsh-web.out.log",
           "title": "DSH 启动日志路径（外接模式取 token 用）",
-          "description": "外接模式取凭据的锚点：优先读同目录下的 dsh-web.token（由启动脚本写入，格式固定），读不到才解析这份日志里的 ?token=...。默认指向本机启动脚本的输出日志；换过启动方式时改这里。"
+          "description": "外接模式取凭据的锚点（Web 版）：优先读同目录下的 dsh-web.token（由启动脚本写入，格式固定），读不到才解析这份日志里的 ?token=...。默认指向本机启动脚本的输出日志；换过启动方式时改这里。桌面版 DSH 不打印 token，改用下方「DSH 家目录」自动取凭据，本项无需设置。"
+        },
+        "desktopPort": {
+          "type": "number",
+          "default": 19387,
+          "title": "桌面端 DSH 端口（外接模式，可选）",
+          "description": "桌面版 DSH 的本地端口（127.0.0.1 上），默认 19387（桌面端官方写死的端口）。外接模式会连同上面「外部 DSH 服务端口」一起探测，谁活着连谁；一般不必修改。"
+        },
+        "dshHome": {
+          "type": "string",
+          "default": "",
+          "title": "DSH 家目录（外接模式取桌面端凭据用，可选）",
+          "description": "桌面版 DSH 不打印 token，插件改为读该目录下 .credentials.yaml 里的签名密钥、本地铸一张浏览器 cookie 完成认证（等价于手动登录一次），全程免手工填 token。留空 = 依次尝试环境变量 DSH_HOME、默认 ~/.dsh，通常无需填写。"
         },
         "model": {
           "type": "string",

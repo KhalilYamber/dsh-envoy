@@ -40,11 +40,14 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 # 测试清单：名称 / 相对路径 / 是否需要本机 DSH
 $Tests = @(
     @{ Name = 'lex-scan（词法扫描，防吞函数）';      File = 'scripts\lex-scan.mjs';            NeedsDsh = $false },
+    @{ Name = 'smoke-desktop-credentials（桌面端本地凭据）'; File = 'research\smoke-desktop-credentials.mjs'; NeedsDsh = $false },
+    @{ Name = 'smoke-candidates（外接多候选选路）';  File = 'research\smoke-candidates.mjs';     NeedsDsh = $false },
     @{ Name = 'test-labels（标签计数器）';         File = 'research\test-labels.mjs';         NeedsDsh = $false },
     @{ Name = 'smoke-routes（路由表）';            File = 'research\smoke-routes.mjs';        NeedsDsh = $false },
     @{ Name = 'test-diagnose（诊断四检+B1）';      File = 'research\test-diagnose.mjs';       NeedsDsh = $false },
     @{ Name = 'smoke-contract（外接契约三层）';     File = 'research\smoke-contract.mjs';      NeedsDsh = $true },
     @{ Name = 'smoke-session-policy（会话延续）';   File = 'research\smoke-session-policy.mjs'; NeedsDsh = $true },
+    @{ Name = 'smoke-session-replay（续跑不丢答案）'; File = 'research\smoke-session-replay.mjs'; NeedsDsh = $true },
     @{ Name = 'test-task-log（任务记录落盘）';     File = 'research\test-task-log.mjs';       NeedsDsh = $true },
     @{ Name = 'test-task-log-extra（并发/终态）';  File = 'research\test-task-log-extra.mjs'; NeedsDsh = $true }
 )

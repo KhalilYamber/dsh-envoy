@@ -305,8 +305,11 @@ async function run(ctx) {
     const msg = String(e?.message || e);
     // 失败转人话：外接模式报「DSH 服务未运行，请先启动」；内置模式 prepare 报错已是人话（node/dsh 缺失、apiKey 未配）
     if (cfg.mode === 'external' || /外接/.test(msg)) {
-      const port = Number(cfg.externalPort || cfg.webPort || manifestDefault('webPort'));
-      throw new Error(`DSH 服务未运行，请先启动（外接模式，127.0.0.1:${port}）。`);
+      const candidates = typeof conn.externalCandidates === 'function' ? conn.externalCandidates() : [];
+      const where = candidates.length
+        ? candidates.join('、')
+        : `http://127.0.0.1:${Number(cfg.externalPort || cfg.webPort || manifestDefault('webPort'))}`;
+      throw new Error(`DSH 服务未运行，请先启动（外接模式，已探测 ${where}）。`);
     }
     // P1-2.2：apiKey 未配在 spawn 前就拦下，给指定话术（不等到进程跑起来报 MISSING_CREDENTIAL）
     if (/apiKey|DEEPSEEK_API_KEY/.test(msg)) {
@@ -325,7 +328,11 @@ async function run(ctx) {
   // P1-2.1：生效模式标注（同步/异步返回文本都带）
   const modeLine =
     mode === 'external'
-      ? `生效模式：external（直连您自跑的 DSH @127.0.0.1:${Number(cfg.externalPort || cfg.webPort || manifestDefault('webPort'))}）`
+      ? `生效模式：external（直连您自跑的 DSH @${
+          typeof conn.externalBase === 'function'
+            ? conn.externalBase()
+            : `127.0.0.1:${Number(cfg.externalPort || cfg.webPort || manifestDefault('webPort'))}`
+        }）`
       : '生效模式：bundled（官方 SDK runtime，依赖官方 npm 安装于插件数据目录 bundled/）';
 
   // ---- 2. 标签【MMdd-NN】 ----

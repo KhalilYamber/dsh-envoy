@@ -122,13 +122,10 @@ async function status(ctx) {
   let external = null;
   if (mode === 'external' || mode === 'auto') {
     // external 探测：轻量 GET /（3s 超时），只读，不起任何服务
-    const port = Number(cfg.externalPort || cfg.webPort || manifestDefault('webPort'));
-    // 0.1.2+ 根地址无凭据回 401：这里只判「服务在不在」，凭据问题留给下面的会话查询报出来
-    const healthy = await makeExternalClient(cfg, s.dataDir, null)
-      .reachable()
-      .then(() => true)
-      .catch(() => false);
-    external = { port, healthy };
+    // 多候选（Web 3080 / 桌面 19387）：客户端逐个探测后锁定，这里报实际命中的基址
+    const probe = makeExternalClient(cfg, s.dataDir, null);
+    const healthy = await probe.reachable().then(() => true).catch(() => false);
+    external = { base: probe.base, healthy, candidates: probe.baseUrls };
   }
   let bundled = null;
   const sdkLeg = conn?.sdkLeg ?? null; // DshConnection 内部句柄，只读列任务进程状态
@@ -310,7 +307,10 @@ async function status(ctx) {
     `连接模式：${modeShown}${effectiveShown ? `（当前生效：${effectiveShown}）` : '（连接尚未建立）'}`
   );
   if (external) {
-    lines.push(`外部 DSH：http://127.0.0.1:${external.port} ${external.healthy ? '✅ 健康' : '❌ 不可达'}`);
+    lines.push(
+      `外部 DSH：${external.base} ${external.healthy ? '✅ 健康' : '❌ 不可达'}`
+      + (external.candidates?.length > 1 ? `（候选：${external.candidates.join('、')}）` : '')
+    );
   }
   if (bundled) {
     lines.push(

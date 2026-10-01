@@ -352,27 +352,31 @@ async function checkT3(cfg, dataDir, logger) {
       note: '内置模式无端口无连接：Node/bundled 依赖见 t1/t2；apiKey 由 dsh_run 首次派单时校验',
     };
   }
-  const port = Number(cfg.externalPort || cfg.webPort || manifestDefault('webPort'));
   const client = makeExternalClient(cfg, dataDir, logger);
   const reachable = await client.reachable();
+  const base = client.base;
+  let port = null;
+  try { port = Number(new URL(base).port) || null; } catch { port = null; }
   const healthy = reachable ? await client.health().then(() => true).catch(() => false) : false;
   return {
     mode: mode === 'external' ? 'external' : 'auto（探测 external）',
+    base,
     port,
+    candidates: client.baseUrls,
     reachable,
     ok: healthy,
     fix: healthy
       ? null
       : reachable
         ? {
-            where: `DSH 服务 127.0.0.1:${port} 在跑，但访问凭据不可用`,
-            why: 'DSH 0.1.2+ 的 Web 服务要求浏览器 cookie；插件需用当前启动的 token 换一次（cookie 有效期约 30 天，跨重启有效）',
-            how: `确认「DSH 启动日志路径」指向 dsh web 的输出日志（默认 D:/DeepSeek-Harness/dsh-web.out.log），或把日志里 ?token=... 那串手工粘进「外部 DSH 访问 token」；token 每次 DSH 启动都会更换`,
+            where: `DSH 服务 ${base} 在跑，但访问凭据不可用`,
+            why: 'DSH 0.1.2+ 的 Web 服务要求浏览器 cookie。Web 版：插件用当前启动的 token 换一次（cookie 有效期约 30 天，跨重启有效）；桌面版：插件读 $DSH_HOME/.credentials.yaml 的签名密钥，本地铸一张 cookie',
+            how: 'Web 版：确认「DSH 启动日志路径」指向 dsh web 的输出日志（默认 D:/DeepSeek-Harness/dsh-web.out.log），或把日志里 ?token=... 那串手工粘进「外部 DSH 访问 token」，token 每次 DSH 启动都会更换；桌面版：确认 DSH 家目录（默认 ~/.dsh）下的 .credentials.yaml 可读（插件已自动读取，通常无需干预）',
           }
         : {
-            where: `DSH 服务 127.0.0.1:${port} 不可达`,
+            where: `DSH 服务不可达（已探测 ${client.baseUrls.join('、')}）`,
             why: '服务未启动、端口被占用、或监听地址不是 127.0.0.1',
-            how: `启动您的 DSH（浏览器打开 http://127.0.0.1:${port} 验证）；不想跑服务可把 mode 改为 bundled（需 apiKey 与官方 npm 安装）`,
+            how: '启动您的 DSH（Web 版浏览器打开 http://127.0.0.1:3080；桌面版启动应用即可），或不想跑服务时把 mode 改为 bundled（需 apiKey 与官方 npm 安装）',
           },
   };
 }
@@ -450,7 +454,7 @@ async function diagnose(ctx) {
   } else if (!t2.ok && t2.error) {
     lines.push(`   ${t2.error}`);
   }
-  lines.push(`③ 连接：${t3.ok === null ? `（${t3.mode}）${t3.note ?? ''}` : t3.ok ? `✅ ${t3.mode} 127.0.0.1:${t3.port} 健康` : `❌ ${t3.mode} 127.0.0.1:${t3.port} 不可达`}${t3.trusted === false ? '（不可信：t1 未通过）' : ''}`);
+  lines.push(`③ 连接：${t3.ok === null ? `（${t3.mode}）${t3.note ?? ''}` : t3.ok ? `✅ ${t3.mode} ${t3.base ?? `127.0.0.1:${t3.port}`} 健康` : `❌ ${t3.mode} ${t3.base ?? `127.0.0.1:${t3.port}`} 不可达`}${t3.trusted === false ? '（不可信：t1 未通过）' : ''}`);
   if (t3.fix) {
     lines.push(`   坏在哪：${t3.fix.where}`);
     lines.push(`   为什么坏：${t3.fix.why}`);
@@ -490,7 +494,9 @@ async function diagnose(ctx) {
           ok: t3.ok,
           trusted: t3.trusted !== false,
           mode: t3.mode ?? null,
+          base: t3.base ?? null,
           port: t3.port ?? null,
+          candidates: t3.candidates ?? null,
           note: t3.note ?? null,
           error: t3.error ?? null,
         },
